@@ -1,20 +1,14 @@
-envVarGroups:
-  - name: career-atlas-shared
-    envVars:
-      - key: SCAN_SECRET
-        generateValue: true
 databases:
   - name: career-atlas-db
-    plan: 0.1c-256mb
+    plan: free
     databaseName: career_atlas
 services:
   - type: web
     name: career-atlas
     runtime: docker
-    plan: 0.5c-512mb
+    plan: free
     healthCheckPath: /api/health
     envVars:
-      - fromGroup: career-atlas-shared
       - key: DATABASE_URL
         fromDatabase:
           name: career-atlas-db
@@ -27,18 +21,3 @@ services:
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
-  - type: cron
-    name: career-atlas-scan
-    runtime: python
-    rootDir: backend
-    plan: 0.5c-512mb
-    schedule: '*/15 * * * *'
-    buildCommand: pip install -r requirements.txt
-    startCommand: python scheduled.py
-    envVars:
-      - fromGroup: career-atlas-shared
-      - key: API_HOST
-        fromService:
-          type: web
-          name: career-atlas
-          property: hostport
