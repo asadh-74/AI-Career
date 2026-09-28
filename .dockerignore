@@ -1,0 +1,11 @@
+.env
+**/.env
+**/.venv
+**/venv
+**/*.db
+**/*.db-*
+**/__pycache__
+flutter/.dart_tool
+flutter/build
+flutter/.idea
+flutter/android/.gradle
