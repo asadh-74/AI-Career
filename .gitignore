@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+*.db
+*.db-*
+__pycache__/
+.dart_tool/
+build/
+.flutter-plugins*
+flutter/.metadata
+flutter/.idea/
