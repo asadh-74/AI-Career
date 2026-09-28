@@ -6,7 +6,7 @@ A new project for Asad's career assistant. This is separate from the earlier loc
 
 - Flutter UI for web and Android: login, company boards, live listings, PDF CV/Resume upload, AI application preparation, official application links, and a review queue.
 - FastAPI API with PostgreSQL persistence on Render (SQLite for local development), one-user password login, PDF text extraction, Greenhouse and Lever public company job feeds, deduplication, Gemini match rationale and a cover note.
-- A Render cron job checks configured company boards every 15 minutes; **Find jobs** also scans on demand. "Real time" means frequent polling, not an instant push notification.
+- **Find jobs** scans configured company boards on demand. This free Render configuration does not include scheduled scanning or instant updates.
 - The application queue never reports **Applied** without an actual employer confirmation recorded by the user.
 - Every imported company job has a Submitted / Not submitted toggle. You can record applications you already sent on the employer's website without an AI draft. The statuses are stored in a new database table.
 - Setup includes quick-add links for Canonical, Smart Working Solutions, Educative, and Xapo Bank. These are public company boards; each posting's location and eligibility still need review. You can add other Greenhouse and Lever boards by URL.
@@ -44,31 +44,20 @@ For Android on a physical phone, use the deployed Render URL in `API_BASE_URL`. 
 
 ## Render deployment
 
-`render.yaml` defines one web service serving the Flutter web build and API at the same URL, a persistent paid Postgres database, and a cron scanner. These resources can incur charges. Render's free web filesystem is ephemeral and free Postgres expires after 30 days, so the Blueprint uses paid persistence. Do not apply the Blueprint until you review its estimated cost.
+`render.yaml` defines a Free web service serving Flutter web and FastAPI at the same URL, plus a Free Render Postgres database. Review the Render estimate before applying. The Free database expires after **30 days**, with no included backups. You must upgrade or export your data before expiration. The Free web service sleeps after inactivity; its filesystem is ephemeral. There is no cron job in this configuration, so use **Find jobs** to scan on demand.
 
-1. Push the inner `career-atlas` folder (the one containing `render.yaml`) to a **private** GitHub repository. `.env`, `.venv`, and `career.db` are ignored. Before pushing, run `git status --short` and verify no secrets or uploaded documents are staged.
-2. In Render, create a Blueprint from that repository and review the services and estimated charges.
-3. Enter `ADMIN_PASSWORD_HASH` from `make_password.py` and a fresh `GEMINI_API_KEY` when prompted. Rotate the previously shown Gemini key before this step. Render generates `SESSION_SECRET` and `SCAN_SECRET`. Never upload the local `.env` or put secrets in Flutter `--dart-define`.
+1. Use the existing repository `https://github.com/asadh-74/AI-Career`. It currently contains the project with `render.yaml` at the root and is public. `.env`, `.venv`, and `career.db` have not been uploaded.
+2. In Render, create a Blueprint from that repository and review that both the web service and database show **Free** before applying.
+3. Enter `ADMIN_PASSWORD_HASH` from `make_password.py` and a fresh `GEMINI_API_KEY` when prompted. Rotate the previously shown Gemini key before this step. Render generates `SESSION_SECRET`. Never upload the local `.env` or put secrets in Flutter `--dart-define`.
 4. After deployment, open the web service URL, log in, upload your CV and Resume, paste real Greenhouse or Lever company careers URLs, then tap **Find jobs**.
 5. Use the same URL as `API_BASE_URL` when building Android.
 
 The hosted PostgreSQL database starts empty. Local jobs, uploaded PDFs, and submitted statuses in `career.db` are **not** transferred automatically. Add your boards and upload your documents again after deployment, or plan a private migration separately. Uploaded PDFs are stored in PostgreSQL; review your Render plan and backups before relying on it as your only copy.
 
-To push from Windows after creating an empty private repository on GitHub, open PowerShell in the `career-atlas` folder (the one containing `render.yaml`) and run:
-
-```powershell
-git init
-git add .
-git commit -m "Deploy Career Atlas"
-git branch -M main
-git remote add origin https://github.com/YOUR-USERNAME/YOUR-PRIVATE-REPOSITORY.git
-git push -u origin main
-```
-
-In Render choose **New → Blueprint**, connect that repository, review the web service, Postgres database, and cron job charges, then apply. The Docker build includes Flutter web and FastAPI at one HTTPS URL, so the web app needs no localhost API setting. The scheduled job checks sources every 15 minutes. The Android app is a separate APK build; Render hosts the web app and API, not an Android app store release.
+In Render choose **New → Blueprint**, connect that repository, confirm that the web service and Postgres database both show Free, then apply. The Docker build includes Flutter web and FastAPI at one HTTPS URL, so the web app needs no localhost API setting. Tap **Find jobs** whenever you want fresh listings. The Android app is a separate APK build; Render hosts the web app and API, not an Android app store release.
 
 ### Limits
 
 - Adding a company means pasting a Greenhouse or Lever hosted HTTPS careers URL. The app derives the board slug. Arbitrary company sites, Workday, LinkedIn, and Indeed are not universal sources.
 - No Flutter SDK or Render account was available in the build workspace, so the Dart app and cloud deployment must be compiled and validated on your Windows machine and Render account. The backend has automated API tests.
-- Password, uploaded PDF bytes, and extracted text are private in the database, but a hosted personal document store deserves access controls and backups. Use a private repo and do not reuse the old exposed Firecrawl key.
+- Password, uploaded PDF bytes, and extracted text are private in the database, but the Free database has no backups and expires after 30 days. Keep your own copies of uploaded PDFs, and do not reuse the exposed Gemini key.
