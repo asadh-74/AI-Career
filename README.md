@@ -5,7 +5,7 @@ A new project for Asad's career assistant. This is separate from the earlier loc
 ## What works
 
 - Flutter UI for web and Android: login, company boards, live listings, PDF CV/Resume upload, AI application preparation, official application links, and a review queue.
-- FastAPI API with PostgreSQL persistence on Render (SQLite for local development), one-user password login, PDF text extraction, Greenhouse and Lever public company job feeds, deduplication, Gemini match rationale and a cover note.
+- FastAPI API with PostgreSQL persistence on Render (SQLite for local development), one-user password login, PDF text extraction, Greenhouse and Lever public company job feeds, deduplication, Gemini match rationale and a cover note. If Gemini fails, a clearly labeled local keyword estimate and generic cover note remain available.
 - **Find jobs** scans configured company boards on demand. This free Render configuration does not include scheduled scanning or instant updates.
 - The application queue never reports **Applied** without an actual employer confirmation recorded by the user.
 - Every imported company job has a Submitted / Not submitted toggle. You can record applications you already sent on the employer's website without an AI draft. The statuses are stored in a new database table.
@@ -26,7 +26,7 @@ powershell -ExecutionPolicy Bypass -File .\start-windows.ps1
 
 On the first run, it installs dependencies and asks for your password. Later runs skip installation. `setup_local.py` creates a private `.env`; edit it to add a **new** `GEMINI_API_KEY`. SQLite is used locally. The API is at `http://127.0.0.1:8000`.
 
-To use **AI match & draft**, upload a text-selectable PDF under **Setup → Resume** or **CV**, then put your Gemini API key in `backend/.env` as `GEMINI_API_KEY=...` and restart the backend. Without a document, the Jobs screen offers an upload button. Without an API key, the backend returns a setup error. Job status tracking works without either.
+To use **Gemini AI matching**, upload a text-selectable PDF under **Setup → Resume** or **CV**, then put a valid Gemini API key in `backend/.env` as `GEMINI_API_KEY=...` and restart the backend. Without a document, the Jobs screen offers an upload button. If Gemini rejects a request, the result states the HTTP status and uses a local keyword estimate, explicitly marked as non-AI. After fixing the key or quota, tap **Match & draft** on that job again to retry Gemini. Job status tracking needs neither a document nor an API key.
 
 When updating an existing local install, replace **both** `backend/main.py` and `flutter/lib/main.dart` from this archive. Keep your existing `backend/.env` and `backend/career.db`. Restart the backend and Flutter. The new status table is created automatically without deleting existing jobs.
 
