@@ -80,3 +80,16 @@ def test_manual_application_tracking_without_ai_or_document():
     assert client.post('/api/job-statuses',headers=h,json={'job_id':job_id,'status':'fake'}).status_code==400
     assert client.post('/api/job-statuses',headers=h,json={'job_id':999999,'status':'submitted'}).status_code==404
     assert len(client.get('/api/job-statuses',headers=h).json())==1
+
+def test_gemini_rejection_has_honest_local_fallback(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_KEY','test-placeholder')
+    class Rejected:
+        status_code=429
+    monkeypatch.setattr(main.httpx,'post',lambda *args,**kwargs:Rejected())
+    job=main.Job(title='Python Backend Engineer',company='Acme',description='Build Python FastAPI APIs',location='Remote')
+    doc=main.Document(extracted_text='Python and FastAPI experience')
+    score,rationale,draft=main.ai_prepare(job,doc)
+    assert 0 <= score <= 85
+    assert 'Local keyword estimate' in rationale and 'HTTP 429' in rationale
+    assert 'not an AI assessment' in rationale
+    assert 'Acme' in draft
