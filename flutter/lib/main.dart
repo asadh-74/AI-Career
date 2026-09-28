@@ -128,7 +128,7 @@ class _WorkspaceState extends State<Workspace> {
         Text(submitted?'Submitted':'Not submitted',style:TextStyle(color:submitted?Colors.green.shade700:null,fontWeight:FontWeight.w600)),
         const SizedBox(height:10),Wrap(spacing:8,runSpacing:8,children:[
           OutlinedButton(onPressed:()=>open(j['applyUrl']),child:const Text('Official form ↗')),
-          OutlinedButton(onPressed:busy?null:documents.isEmpty?()=>upload('Resume'):()=>prepare(j,documents.any((d)=>d['kind']=='Resume')?'Resume':'CV'),child:Text(documents.isEmpty?'Upload resume for AI match':'AI match & draft')),
+          OutlinedButton(onPressed:busy?null:documents.isEmpty?()=>upload('Resume'):()=>prepare(j,documents.any((d)=>d['kind']=='Resume')?'Resume':'CV'),child:Text(documents.isEmpty?'Upload resume for AI match':'Match & draft')),
           OutlinedButton(onPressed:()=>markStatus(j,submitted?'not_submitted':'submitted'),child:Text(submitted?'Mark not submitted':'Mark submitted')),
         ])
       ])));
