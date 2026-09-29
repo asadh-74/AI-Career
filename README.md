@@ -1,6 +1,6 @@
 # Career Atlas — Flutter and FastAPI
 
-A new project for Asad's career assistant. This is separate from the earlier local n8n/SQLite dashboard.
+Live at https://career-atlas-yhx1.onrender.com/
 
 ## What works
 
