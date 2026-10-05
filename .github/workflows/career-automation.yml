@@ -3,7 +3,13 @@ name: Career Atlas Automation
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 */6 * * *"
+    # 05:30 and 07:30 Pakistan time (UTC+5)
+    - cron: "30 0 * * *"
+    - cron: "30 2 * * *"
+
+concurrency:
+  group: career-atlas-auto-apply
+  cancel-in-progress: false
 
 jobs:
   apply:
@@ -18,15 +24,15 @@ jobs:
       ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: gemini-3.8-flash
-      AUTO_APPLY: ${{ vars.AUTO_APPLY || 'false' }}
-      MIN_MATCH_SCORE: ${{ vars.MIN_MATCH_SCORE || '72' }}
-      MAX_APPLICATIONS_PER_DAY: ${{ vars.MAX_APPLICATIONS_PER_DAY || '15' }}
-      REMOTE_ONLY: ${{ vars.REMOTE_ONLY || 'true' }}
-      ALLOW_EMAIL_APPLICATIONS: ${{ vars.ALLOW_EMAIL_APPLICATIONS || 'true' }}
-      ALLOW_BROWSER_APPLICATIONS: ${{ vars.ALLOW_BROWSER_APPLICATIONS || 'true' }}
+      AUTO_APPLY: "true"
+      MIN_MATCH_SCORE: "75"
+      MAX_APPLICATIONS_PER_DAY: "10"
+      REMOTE_ONLY: "true"
+      ALLOW_EMAIL_APPLICATIONS: "true"
+      ALLOW_BROWSER_APPLICATIONS: "true"
       ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
       ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
-      AUTO_SUBMIT_BROWSER: ${{ vars.AUTO_SUBMIT_BROWSER || 'false' }}
+      AUTO_SUBMIT_BROWSER: "true"
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
