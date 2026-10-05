@@ -53,6 +53,14 @@ def remote_eligible(location: str) -> bool:
 
 def title_relevant(title: str) -> bool:
     t=(title or "").lower()
+    excluded=(
+        "director", "vice president", "vp ", "head of ", "principal",
+        "staff engineer", "engineering manager", "sales manager",
+        "sales director", "account manager", "solutions architecture manager",
+        "senior manager",
+    )
+    if any(term in t for term in excluded):
+        return False
     return any(term in t for term in TARGET_TITLE_TERMS)
 
 def run():
