@@ -160,16 +160,26 @@ def run():
                 stats["alreadyApplied"]+=1
                 continue
 
-            if not existing:
+            needs_rescore = (
+                existing is not None
+                and (existing.rationale or "").startswith("Local keyword estimate")
+            )
+            if not existing or needs_rescore:
                 score,rationale,draft=ai_prepare(job,doc)
-                existing=Application(
-                    job_id=job.id,
-                    document_id=doc.id,
-                    score=score,
-                    rationale=rationale,
-                    draft=draft,
-                )
-                session.add(existing)
+                if existing:
+                    existing.document_id=doc.id
+                    existing.score=score
+                    existing.rationale=rationale
+                    existing.draft=draft
+                else:
+                    existing=Application(
+                        job_id=job.id,
+                        document_id=doc.id,
+                        score=score,
+                        rationale=rationale,
+                        draft=draft,
+                    )
+                    session.add(existing)
                 session.flush()
                 stats["scored"]+=1
 
