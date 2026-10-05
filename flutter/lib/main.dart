@@ -121,9 +121,20 @@ class _WorkspaceState extends State<Workspace> {
     Wrap(spacing:8,runSpacing:4,children:[
       OutlinedButton(onPressed:()=>open('https://pk.indeed.com/jobs?q=${Uri.encodeQueryComponent(query.trim().isEmpty ? 'software engineer' : query.trim())}&l=Pakistan'),child:const Text('Indeed ↗')),
       OutlinedButton(onPressed:()=>open('https://www.glassdoor.com/Job/pakistan-jobs-SRCH_IL.0,8_IN192.htm'),child:const Text('Glassdoor ↗')),
+      OutlinedButton(onPressed:()=>open('https://www.linkedin.com/jobs/search/?keywords=${Uri.encodeQueryComponent(query.trim().isEmpty ? 'software engineer' : query.trim())}&f_WT=2'),child:const Text('LinkedIn ↗')),
+      OutlinedButton(onPressed:()=>open('https://wellfound.com/jobs'),child:const Text('Wellfound ↗')),
+      OutlinedButton(onPressed:()=>open('https://remoteok.com/'),child:const Text('Remote OK ↗')),
+      OutlinedButton(onPressed:()=>open('https://remotive.com/remote-jobs'),child:const Text('Remotive ↗')),
+      OutlinedButton(onPressed:()=>open('https://jobicy.com/'),child:const Text('Jobicy ↗')),
+      OutlinedButton(onPressed:()=>open('https://himalayas.app/jobs'),child:const Text('Himalayas ↗')),
+      OutlinedButton(onPressed:()=>open('https://weworkremotely.com/'),child:const Text('We Work Remotely ↗')),
+      OutlinedButton(onPressed:()=>open('https://www.workingnomads.com/remote-jobs'),child:const Text('Working Nomads ↗')),
+      OutlinedButton(onPressed:()=>open('https://nodesk.co/remote-jobs/'),child:const Text('NoDesk ↗')),
+      OutlinedButton(onPressed:()=>open('https://remote.co/remote-jobs/'),child:const Text('Remote.co ↗')),
+      OutlinedButton(onPressed:()=>open('https://www.arbeitnow.com/'),child:const Text('Arbeitnow ↗')),
       OutlinedButton(onPressed:()=>open('https://www.rozee.pk/EN/search/software-engineer-jobs-in-pakistan'),child:const Text('ROZEE.PK ↗')),
       OutlinedButton(onPressed:()=>open('https://www.mustakbil.com/'),child:const Text('Mustakbil ↗')),
-    ]),const Text('External sites open separately; their jobs are not imported into this list.'),const SizedBox(height:10),
+    ]),const Text('Remote OK, Remotive, Jobicy, Himalayas, We Work Remotely and Arbeitnow are also imported automatically. Other sites open as live search/apply sources.'),const SizedBox(height:10),
     Expanded(child:filtered.isEmpty?Center(child:Text(jobs.isEmpty?'Add a company board in Setup, then tap Find jobs.':'No roles match these filters.')):ListView.builder(itemCount:filtered.length,itemBuilder:(c,i){
       final j=filtered[i] as Map;final submitted=statusFor(j['id'] as int)=='submitted';
       return Card(child:Padding(padding:const EdgeInsets.all(15),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
