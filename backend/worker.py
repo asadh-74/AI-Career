@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import re
+import os
 
 import httpx
 from sqlalchemy import select
@@ -127,7 +128,12 @@ def run():
             return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
 
         # Recent jobs first. Cap expensive Gemini scoring so a scheduled run stays bounded.
-        jobs=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(300)).all()
+        target_job_id=(os.getenv("TARGET_JOB_ID") or "").strip()
+        if target_job_id.isdigit():
+            target=session.get(Job,int(target_job_id))
+            jobs=[target] if target else []
+        else:
+            jobs=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(300)).all()
         max_to_score=max(30, min(60, cfg.daily_limit*2))
 
         for job in jobs:
