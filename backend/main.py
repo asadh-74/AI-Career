@@ -3,6 +3,7 @@ import io
 import os
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -244,8 +245,28 @@ def ai_prepare(job,doc):
         if r.status_code==404:
             last_error=f'Gemini model {model} unavailable'
             continue
-        if r.status_code>=400:
-            hint={400:'check the request',401:'check the API key',403:'check key permissions or billing',429:'quota or rate limit reached',503:'Gemini temporarily unavailable'}.get(r.status_code,'request rejected')
+        if r.status_code in (429,503):
+            last_error=f'Gemini HTTP {r.status_code}: temporary service/quota issue'
+            # Retry the same model once after a short backoff, then try fallbacks.
+            time.sleep(2)
+            try:
+                retry=httpx.post(
+                    f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+                    headers={'x-goog-api-key':key},
+                    json={
+                        'contents':[{'parts':[{'text':prompt}]}],
+                        'generationConfig':{'responseMimeType':'application/json','temperature':0.2},
+                    },
+                    timeout=45,
+                )
+                if retry.status_code<400:
+                    r=retry
+                else:
+                    continue
+            except httpx.RequestError:
+                continue
+        elif r.status_code>=400:
+            hint={400:'check the request',401:'check the API key',403:'check key permissions or billing'}.get(r.status_code,'request rejected')
             return local_match(f'Gemini HTTP {r.status_code}: {hint}')
         try:
             out=json.loads(r.json()['candidates'][0]['content']['parts'][0]['text'])
