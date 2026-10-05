@@ -53,7 +53,14 @@ def remote_eligible(location: str) -> bool:
     loc=(location or "").strip().lower()
     if not loc:
         return False
-    if any(x in loc for x in ("remote", "worldwide", "anywhere", "global")):
+    if any(x in loc for x in (
+        "remote",
+        "home based - worldwide",
+        "home-based - worldwide",
+        "worldwide",
+        "anywhere",
+        "global",
+    )):
         return True
     if any(x in loc for x in ("pakistan", "apac", "asia")) and any(
         x in loc for x in ("home based", "home-based", "distributed", "virtual")
