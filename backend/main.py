@@ -305,6 +305,28 @@ def applications(session:Session=Depends(db)):
         if changed:
             session.commit()
     return [app_out(x) for x in items]
+
+@app.get('/api/applications/submitted', dependencies=[Depends(auth)])
+def submitted_applications(session:Session=Depends(db)):
+    rows=session.execute(
+        select(Application,Job,JobStatus)
+        .join(Job,Job.id==Application.job_id)
+        .join(JobStatus,JobStatus.job_id==Application.job_id)
+        .where(Application.status=="applied",JobStatus.status=="submitted")
+        .order_by(JobStatus.updated_at.desc())
+    ).all()
+    return [{
+        "applicationId":a.id,
+        "jobId":j.id,
+        "company":j.company,
+        "title":j.title,
+        "location":j.location,
+        "provider":j.provider,
+        "applyUrl":j.apply_url,
+        "score":a.score,
+        "receipt":a.receipt or s.note,
+        "submittedAt":s.updated_at.isoformat(),
+    } for a,j,s in rows]
 @app.post('/api/applications/{application_id}/confirm', dependencies=[Depends(auth)])
 def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
     item=session.get(Application,application_id)
