@@ -151,6 +151,14 @@ def apply_with_playwright(url,pdf,filename,draft):
                 if gender:
                     _select_known_answer(page,r"gender",gender)
 
+                ethnicity_raw=os.getenv("APPLICANT_ETHNICITY_OPTIONS","").strip()
+                ethnicity_options=[x.strip() for x in ethnicity_raw.split("|") if x.strip()]
+                ethnicity_answer=""
+                for option in ethnicity_options:
+                    if _select_known_answer(page,r"race|ethnicity",option):
+                        ethnicity_answer=option
+                        break
+
                 labels=page.locator("label")
                 for i in range(min(labels.count(),80)):
                     text=(labels.nth(i).inner_text() or "").strip()
@@ -158,6 +166,8 @@ def apply_with_playwright(url,pdf,filename,draft):
                         continue
                     low=text.lower()
                     if "gender" in low and gender:
+                        continue
+                    if ("race" in low or "ethnicity" in low) and ethnicity_answer:
                         continue
                     if needs_human(text):
                         return {"status":"needs_human","reason":f"Sensitive/uncertain question: {text[:180]}"}
