@@ -16,6 +16,7 @@ from main import (
     Application, Document, Job, JobStatus, SessionLocal,
     ai_prepare, scan,
 )
+from public_sources import scan_public_sources
 
 TARGET_TITLE_TERMS = (
     # Core software roles
@@ -90,6 +91,7 @@ def run():
         "sourcesScanned":0,
         "newJobs":0,
         "scanErrors":[],
+        "publicSources":{},
         "jobsConsidered":0,
         "remoteEligible":0,
         "titleRelevant":0,
@@ -105,13 +107,16 @@ def run():
     with SessionLocal() as session:
         # Always refresh configured Greenhouse/Lever boards before applying.
         try:
-            with httpx.Client(timeout=25, follow_redirects=True) as client:
+            with httpx.Client(timeout=30, follow_redirects=True) as client:
                 scan_result=scan(session, client)
-            stats["newJobs"]=scan_result.get("added",0)
-            stats["scanErrors"]=scan_result.get("errors",[])
-            # Count active sources after scan.
+                public_result=scan_public_sources(session, client)
+            stats["newJobs"]=scan_result.get("added",0)+public_result.get("added",0)
+            stats["scanErrors"]=scan_result.get("errors",[])+public_result.get("errors",[])
+            stats["publicSources"]=public_result.get("details",{})
+            # Count active company sources plus public feeds.
             from main import Source
-            stats["sourcesScanned"]=len(session.scalars(select(Source).where(Source.active==True)).all())
+            company_sources=len(session.scalars(select(Source).where(Source.active==True)).all())
+            stats["sourcesScanned"]=company_sources+len(stats["publicSources"])
         except Exception as exc:
             stats["scanErrors"]=[f"scan failed: {type(exc).__name__}: {str(exc)[:180]}"]
 
