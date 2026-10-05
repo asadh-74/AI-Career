@@ -17,7 +17,7 @@ jobs:
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+      GEMINI_MODEL: gemini-3.8-flash
       AUTO_APPLY: ${{ vars.AUTO_APPLY || 'false' }}
       MIN_MATCH_SCORE: ${{ vars.MIN_MATCH_SCORE || '72' }}
       MAX_APPLICATIONS_PER_DAY: ${{ vars.MAX_APPLICATIONS_PER_DAY || '15' }}
