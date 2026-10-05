@@ -106,20 +106,23 @@ def run():
     }
 
     with SessionLocal() as session:
-        # Always refresh configured Greenhouse/Lever boards before applying.
-        try:
-            with httpx.Client(timeout=30, follow_redirects=True) as client:
-                scan_result=scan(session, client)
-                public_result=scan_public_sources(session, client)
-            stats["newJobs"]=scan_result.get("added",0)+public_result.get("added",0)
-            stats["scanErrors"]=scan_result.get("errors",[])+public_result.get("errors",[])
-            stats["publicSources"]=public_result.get("details",{})
-            # Count active company sources plus public feeds.
-            from main import Source
-            company_sources=len(session.scalars(select(Source).where(Source.active==True)).all())
-            stats["sourcesScanned"]=company_sources+len(stats["publicSources"])
-        except Exception as exc:
-            stats["scanErrors"]=[f"scan failed: {type(exc).__name__}: {str(exc)[:180]}"]
+        target_job_id=(os.getenv("TARGET_JOB_ID") or "").strip()
+
+        # Scheduled runs refresh all sources. Targeted one-job runs skip discovery
+        # so the application attempt starts immediately.
+        if not target_job_id.isdigit():
+            try:
+                with httpx.Client(timeout=30, follow_redirects=True) as client:
+                    scan_result=scan(session, client)
+                    public_result=scan_public_sources(session, client)
+                stats["newJobs"]=scan_result.get("added",0)+public_result.get("added",0)
+                stats["scanErrors"]=scan_result.get("errors",[])+public_result.get("errors",[])
+                stats["publicSources"]=public_result.get("details",{})
+                from main import Source
+                company_sources=len(session.scalars(select(Source).where(Source.active==True)).all())
+                stats["sourcesScanned"]=company_sources+len(stats["publicSources"])
+            except Exception as exc:
+                stats["scanErrors"]=[f"scan failed: {type(exc).__name__}: {str(exc)[:180]}"]
 
         doc=session.scalar(select(Document).where(Document.kind=="Resume"))
         if not doc:
@@ -128,7 +131,6 @@ def run():
             return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
 
         # Recent jobs first. Cap expensive Gemini scoring so a scheduled run stays bounded.
-        target_job_id=(os.getenv("TARGET_JOB_ID") or "").strip()
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id))
             jobs=[target] if target else []
