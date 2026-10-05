@@ -95,6 +95,29 @@ def _fill(page,label,value):
     except Exception:pass
     return False
 
+def _select_known_answer(page,label_pattern,value):
+    if not value:return False
+    try:
+        field=page.get_by_label(re.compile(label_pattern,re.I))
+        if field.count():
+            first=field.first
+            tag=first.evaluate("(el)=>el.tagName.toLowerCase()")
+            if tag=="select":
+                try:first.select_option(label=re.compile(rf"^{re.escape(str(value))}$",re.I));return True
+                except Exception:
+                    try:first.select_option(value=str(value));return True
+                    except Exception:pass
+    except Exception:pass
+    try:
+        radio=page.get_by_role("radio",name=re.compile(rf"^{re.escape(str(value))}$",re.I))
+        if radio.count():radio.first.check();return True
+    except Exception:pass
+    try:
+        option=page.get_by_text(re.compile(rf"^{re.escape(str(value))}$",re.I),exact=True)
+        if option.count():option.first.click();return True
+    except Exception:pass
+    return False
+
 def _stop_signal(page):
     text=(page.locator("body").inner_text(timeout=5000) or "")[:30000].lower()
     if "captcha" in text or "verify you are human" in text or "security check" in text:
@@ -123,10 +146,20 @@ def apply_with_playwright(url,pdf,filename,draft):
                 _fill(page,r"cover.?letter|message|additional information",draft)
                 uploads=page.locator('input[type="file"]')
                 if uploads.count():uploads.first.set_input_files(str(resume_path))
+                # Use explicit user-provided demographic answers only when present.
+                gender=os.getenv("APPLICANT_GENDER","").strip() or str(profile.get("gender","")).strip()
+                if gender:
+                    _select_known_answer(page,r"gender",gender)
+
                 labels=page.locator("label")
                 for i in range(min(labels.count(),80)):
                     text=(labels.nth(i).inner_text() or "").strip()
-                    if text and needs_human(text):
+                    if not text:
+                        continue
+                    low=text.lower()
+                    if "gender" in low and gender:
+                        continue
+                    if needs_human(text):
                         return {"status":"needs_human","reason":f"Sensitive/uncertain question: {text[:180]}"}
                 if not AutomationConfig.from_env().auto_submit_browser:
                     return {"status":"ready","reason":"Form filled; AUTO_SUBMIT_BROWSER is disabled"}
