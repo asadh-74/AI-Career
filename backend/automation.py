@@ -137,6 +137,20 @@ def apply_with_playwright(url,pdf,filename,draft):
             browser=p.chromium.launch(headless=True); page=browser.new_page()
             try:
                 page.goto(url,wait_until="domcontentloaded",timeout=45000)
+
+                # Aggregator/job-board pages often expose an Apply link that opens
+                # the actual employer form. Follow one clear application link first.
+                host=(urlparse(page.url).hostname or "").lower()
+                if any(x in host for x in ("weworkremotely.com","remoteok.com","jobicy.com","himalayas.app","arbeitnow.com","remotive.com")):
+                    try:
+                        apply_link=page.get_by_role("link",name=re.compile(r"^apply( now)?$|apply for|apply to",re.I))
+                        if apply_link.count():
+                            href=apply_link.first.get_attribute("href")
+                            if href:
+                                page.goto(href,wait_until="domcontentloaded",timeout=45000)
+                    except Exception:
+                        pass
+
                 signal=_stop_signal(page)
                 if signal:return {"status":"needs_human","reason":signal}
                 _fill(page,r"full.?name|name",profile.get("name",""))
