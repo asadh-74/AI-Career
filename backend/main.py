@@ -221,18 +221,39 @@ def ai_prepare(job,doc):
         return score,rationale,draft
     if not key:return local_match('Gemini API key is not configured')
     prompt=f'''You are a careful job matching assistant. Use only the CV/resume and job text. Return ONLY JSON with score (0-100 integer), rationale (two sentences), draft (short cover note), and eligible (boolean). Do not invent achievements. If requirements or location cannot be confirmed, state this in rationale.\nDOCUMENT:\n{doc.extracted_text[:16000]}\nJOB TITLE: {job.title}\nLOCATION: {job.location}\nJOB:\n{job.description[:10000]}'''
-    try:
-        r=httpx.post(f'https://generativelanguage.googleapis.com/v1beta/models/{os.getenv("GEMINI_MODEL","gemini-3.8-flash")}:generateContent',headers={'x-goog-api-key':key},json={'contents':[{'parts':[{'text':prompt}]}],'generationConfig':{'responseMimeType':'application/json','temperature':0.2}},timeout=45)
-    except httpx.RequestError:
-        return local_match('Gemini connection failed')
-    if r.status_code >= 400:
-        hint={400:'check the model and request',401:'check the API key',403:'check key permissions or billing',404:'check GEMINI_MODEL',429:'quota or rate limit reached',503:'Gemini temporarily unavailable'}.get(r.status_code,'request rejected')
-        return local_match(f'Gemini HTTP {r.status_code}: {hint}')
-    try:
-        out=json.loads(r.json()['candidates'][0]['content']['parts'][0]['text'])
-        return max(0,min(100,int(out['score']))),str(out['rationale'])[:1500],str(out['draft'])[:4000]
-    except (KeyError,ValueError,TypeError,IndexError):
-        return local_match('Gemini returned an unreadable response')
+    configured=os.getenv("GEMINI_MODEL","gemini-3.8-flash").strip()
+    models=[]
+    for model in (configured,"gemini-3.8-flash","gemini-3.5-flash","gemini-flash-latest"):
+        if model and model not in models:
+            models.append(model)
+    last_error="Gemini request rejected"
+    for model in models:
+        try:
+            r=httpx.post(
+                f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+                headers={'x-goog-api-key':key},
+                json={
+                    'contents':[{'parts':[{'text':prompt}]}],
+                    'generationConfig':{'responseMimeType':'application/json','temperature':0.2},
+                },
+                timeout=45,
+            )
+        except httpx.RequestError:
+            last_error='Gemini connection failed'
+            continue
+        if r.status_code==404:
+            last_error=f'Gemini model {model} unavailable'
+            continue
+        if r.status_code>=400:
+            hint={400:'check the request',401:'check the API key',403:'check key permissions or billing',429:'quota or rate limit reached',503:'Gemini temporarily unavailable'}.get(r.status_code,'request rejected')
+            return local_match(f'Gemini HTTP {r.status_code}: {hint}')
+        try:
+            out=json.loads(r.json()['candidates'][0]['content']['parts'][0]['text'])
+            return max(0,min(100,int(out['score']))),str(out['rationale'])[:1500],str(out['draft'])[:4000]
+        except (KeyError,ValueError,TypeError,IndexError,json.JSONDecodeError):
+            last_error=f'Gemini {model} returned an unreadable response'
+            continue
+    return local_match(last_error)
 @app.post('/api/applications/prepare', dependencies=[Depends(auth)])
 def prepare(body:PrepareIn,session:Session=Depends(db)):
     job=session.get(Job,body.job_id);doc=session.scalar(select(Document).where(Document.kind==body.document_kind))
@@ -246,7 +267,23 @@ def prepare(body:PrepareIn,session:Session=Depends(db)):
     item=Application(job_id=job.id,document_id=doc.id,score=score,rationale=rationale,draft=draft)
     session.add(item);session.commit();session.refresh(item);return app_out(item)
 @app.get('/api/applications', dependencies=[Depends(auth)])
-def applications(session:Session=Depends(db)):return [app_out(x) for x in session.scalars(select(Application).order_by(Application.created_at.desc())).all()]
+def applications(session:Session=Depends(db)):
+    items=session.scalars(select(Application).order_by(Application.created_at.desc())).all()
+    if os.getenv('GEMINI_API_KEY'):
+        changed=False
+        for item in items:
+            if (item.rationale or '').startswith('Local keyword estimate'):
+                job=session.get(Job,item.job_id)
+                doc=session.get(Document,item.document_id)
+                if job and doc:
+                    score,rationale,draft=ai_prepare(job,doc)
+                    item.score=score
+                    item.rationale=rationale
+                    item.draft=draft
+                    changed=True
+        if changed:
+            session.commit()
+    return [app_out(x) for x in items]
 @app.post('/api/applications/{application_id}/confirm', dependencies=[Depends(auth)])
 def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
     item=session.get(Application,application_id)
