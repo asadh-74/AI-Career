@@ -61,3 +61,33 @@ In Render choose **New → Blueprint**, connect that repository, confirm that th
 - Adding a company means pasting a Greenhouse or Lever hosted HTTPS careers URL. The app derives the board slug. Arbitrary company sites, Workday, LinkedIn, and Indeed are not universal sources.
 - No Flutter SDK or Render account was available in the build workspace, so the Dart app and cloud deployment must be compiled and validated on your Windows machine and Render account. The backend has automated API tests.
 - Password, uploaded PDF bytes, and extracted text are private in the database, but the Free database has no backups and expires after 30 days. Keep your own copies of uploaded PDFs, and do not reuse the exposed Gemini key.
+
+
+## Career Atlas Automation v2
+
+This branch adds a fail-safe job application worker on top of the existing FastAPI/Flutter application.
+
+### Added
+
+- Playwright as the primary browser form automation engine.
+- Selenium as a fallback browser adapter.
+- Email application routing when a job description contains a valid application email.
+- Gemini-backed match scoring and drafting reuse from the existing application pipeline.
+- Configurable match threshold, daily application limit, remote-only filtering, and provider switches.
+- Automatic resume/CV attachment for email and browser applications.
+- Safety stops for CAPTCHA, employer assessments, work authorization/sponsorship, salary, clearance, demographic, criminal-history, and other uncertain questions.
+- Application receipts/status tracking back into the existing PostgreSQL/SQLite tables.
+- `GET /api/automation/config` and `POST /api/automation/run` endpoints.
+- A scheduled GitHub Actions worker every six hours plus manual workflow dispatch.
+
+### Important behavior
+
+`AUTO_SUBMIT_BROWSER` defaults to `false`. With that default, Playwright fills a recognized form and stops before the final submission button. Set it to `true` only after testing the target application flows. Even then, the worker refuses to guess sensitive or uncertain screening answers and never bypasses CAPTCHA or anti-bot checks.
+
+The worker does not use an AI-detector evasion service. It performs a small writing-quality pass and keeps Gemini grounded in the uploaded resume/CV and job description.
+
+### Required automation configuration
+
+Copy the new variables from `backend/.env.example`. For GitHub Actions, configure repository secrets for the hosted `DATABASE_URL`, Gemini key, verified `APPLICANT_PROFILE_JSON`, and optional SMTP credentials. Configure repository variables such as `AUTO_APPLY`, `MIN_MATCH_SCORE`, `MAX_APPLICATIONS_PER_DAY`, and `AUTO_SUBMIT_BROWSER`.
+
+For Gmail SMTP, use an account-specific credential rather than your normal Google password. Do not commit credentials to the repository.
