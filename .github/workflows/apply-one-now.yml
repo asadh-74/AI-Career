@@ -28,7 +28,7 @@ jobs:
       ALLOW_INDEED: "false"
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
-      TARGET_JOB_ID: "112"
+      TARGET_JOB_ID: "727"
       APPLICANT_GENDER: "Male"
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
