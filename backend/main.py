@@ -263,6 +263,29 @@ def submit(application_id:int,session:Session=Depends(db)):
     job=session.get(Job,item.job_id)
     return {'status':'needs_human','reason':'This employer does not provide applicant-side API access. Open the official form, review its questions, and submit there. Record the confirmation afterward.','applyUrl':job.apply_url}
 
+
+@app.get('/api/automation/config', dependencies=[Depends(auth)])
+def automation_config():
+    from automation import AutomationConfig
+    cfg=AutomationConfig.from_env()
+    return {
+        'enabled':cfg.enabled,
+        'minMatchScore':cfg.min_match_score,
+        'dailyLimit':cfg.daily_limit,
+        'remoteOnly':cfg.remote_only,
+        'allowEmail':cfg.allow_email,
+        'allowBrowser':cfg.allow_browser,
+        'allowIndeed':cfg.allow_indeed,
+        'allowGlassdoor':cfg.allow_glassdoor,
+        'autoSubmitBrowser':cfg.auto_submit_browser,
+    }
+
+@app.post('/api/automation/run', dependencies=[Depends(auth)])
+def automation_run():
+    from worker import run
+    return run()
+
+
 WEB=Path(__file__).parent/'web'
 if WEB.exists():
     app.mount('/assets',StaticFiles(directory=WEB/'assets'),name='assets')
