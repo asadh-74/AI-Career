@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import re
 import os
 
@@ -136,11 +137,27 @@ def run():
             jobs=[target] if target else []
         else:
             jobs=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(300)).all()
-        max_to_score=max(30, min(60, cfg.daily_limit*2))
+        max_to_score=max(40, min(100, cfg.daily_limit*8))
+
+        # Enforce a real calendar-day submission cap in Pakistan time.
+        pkt=ZoneInfo("Asia/Karachi")
+        now_pkt=datetime.now(pkt)
+        day_start_pkt=now_pkt.replace(hour=0,minute=0,second=0,microsecond=0)
+        day_start_utc=day_start_pkt.astimezone(timezone.utc)
+        submitted_today=len(session.scalars(
+            select(JobStatus).where(
+                JobStatus.status=="submitted",
+                JobStatus.updated_at>=day_start_utc,
+            )
+        ).all())
+        stats["submittedToday"]=submitted_today
+        remaining_today=max(0,cfg.daily_limit-submitted_today)
+        stats["remainingToday"]=remaining_today
+        max_attempts=max(20,min(60,remaining_today*6 if remaining_today else 20))
 
         for job in jobs:
             stats["jobsConsidered"]+=1
-            if stats["processed"]>=cfg.daily_limit or stats["scored"]>=max_to_score:
+            if stats["applied"]>=remaining_today or stats["processed"]>=max_attempts or stats["scored"]>=max_to_score:
                 break
 
             if cfg.remote_only and not remote_eligible(job.location):
