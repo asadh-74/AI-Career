@@ -1,0 +1,45 @@
+name: Career Atlas Automation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash' }}
+      AUTO_APPLY: ${{ vars.AUTO_APPLY || 'false' }}
+      MIN_MATCH_SCORE: ${{ vars.MIN_MATCH_SCORE || '72' }}
+      MAX_APPLICATIONS_PER_DAY: ${{ vars.MAX_APPLICATIONS_PER_DAY || '15' }}
+      REMOTE_ONLY: ${{ vars.REMOTE_ONLY || 'true' }}
+      ALLOW_EMAIL_APPLICATIONS: ${{ vars.ALLOW_EMAIL_APPLICATIONS || 'true' }}
+      ALLOW_BROWSER_APPLICATIONS: ${{ vars.ALLOW_BROWSER_APPLICATIONS || 'true' }}
+      ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
+      ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
+      AUTO_SUBMIT_BROWSER: ${{ vars.AUTO_SUBMIT_BROWSER || 'false' }}
+      APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python worker.py
