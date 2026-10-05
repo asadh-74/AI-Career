@@ -222,7 +222,7 @@ def ai_prepare(job,doc):
     if not key:return local_match('Gemini API key is not configured')
     prompt=f'''You are a careful job matching assistant. Use only the CV/resume and job text. Return ONLY JSON with score (0-100 integer), rationale (two sentences), draft (short cover note), and eligible (boolean). Do not invent achievements. If requirements or location cannot be confirmed, state this in rationale.\nDOCUMENT:\n{doc.extracted_text[:16000]}\nJOB TITLE: {job.title}\nLOCATION: {job.location}\nJOB:\n{job.description[:10000]}'''
     try:
-        r=httpx.post(f'https://generativelanguage.googleapis.com/v1beta/models/{os.getenv("GEMINI_MODEL","gemini-2.5-flash")}:generateContent',headers={'x-goog-api-key':key},json={'contents':[{'parts':[{'text':prompt}]}],'generationConfig':{'responseMimeType':'application/json','temperature':0.2}},timeout=45)
+        r=httpx.post(f'https://generativelanguage.googleapis.com/v1beta/models/{os.getenv("GEMINI_MODEL","gemini-3.8-flash")}:generateContent',headers={'x-goog-api-key':key},json={'contents':[{'parts':[{'text':prompt}]}],'generationConfig':{'responseMimeType':'application/json','temperature':0.2}},timeout=45)
     except httpx.RequestError:
         return local_match('Gemini connection failed')
     if r.status_code >= 400:
