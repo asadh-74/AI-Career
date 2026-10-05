@@ -1,0 +1,47 @@
+name: Apply One Job Now
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apply-one-now.yml"
+
+jobs:
+  apply-one:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-3.8-flash
+      AUTO_APPLY: "true"
+      MIN_MATCH_SCORE: "75"
+      MAX_APPLICATIONS_PER_DAY: "1"
+      REMOTE_ONLY: "true"
+      ALLOW_EMAIL_APPLICATIONS: "true"
+      ALLOW_BROWSER_APPLICATIONS: "true"
+      ALLOW_INDEED: "false"
+      ALLOW_GLASSDOOR: "false"
+      AUTO_SUBMIT_BROWSER: "true"
+      TARGET_JOB_ID: "95"
+      APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python worker.py
