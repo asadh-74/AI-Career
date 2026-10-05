@@ -18,11 +18,21 @@ from main import (
 )
 
 TARGET_TITLE_TERMS = (
-    "backend", "back-end", "python", "fastapi", "software engineer",
-    "software developer", "full stack", "full-stack", "ai engineer",
-    "machine learning", "ml engineer", "automation", "agentic",
-    "artificial intelligence", "api engineer", "platform engineer",
-    "embedded", "iot", "computer vision", "data engineer",
+    # Core software roles
+    "software engineer", "software developer", "application developer",
+    "python engineer", "python developer", "python",
+    "backend engineer", "backend developer", "back-end engineer", "back-end developer",
+    "backend", "back-end", "fastapi", "api engineer",
+    "frontend engineer", "frontend developer", "front-end engineer", "front-end developer",
+    "frontend", "front-end", "web developer",
+    "full stack", "full-stack", "fullstack",
+
+    # AI / automation / data roles
+    "ai engineer", "machine learning", "ml engineer", "automation", "agentic",
+    "artificial intelligence", "platform engineer", "data engineer",
+
+    # Embedded / IoT roles
+    "embedded", "iot", "computer vision",
 )
 
 def mark_status(session, job_id, status, note):
