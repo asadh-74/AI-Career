@@ -227,13 +227,23 @@ def _fill_standard_fields(page,profile,draft,resume_path):
         except Exception:pass
 
 def _sensitive_or_unknown_required(page):
-    labels=page.locator("label")
+    root=page
+    try:
+        submit=_find_submit(page)
+        if submit is not None:
+            form=submit.locator("xpath=ancestor::form[1]")
+            if form.count():
+                root=form.first
+    except Exception:
+        pass
+
+    labels=root.locator("label")
     for i in range(min(labels.count(),120)):
         text=(labels.nth(i).inner_text() or "").strip()
         if text and needs_human(text):
             return f"Sensitive/uncertain question: {text[:180]}"
 
-    required=page.locator("input[required], textarea[required], select[required]")
+    required=root.locator("input[required], textarea[required], select[required]")
     safe_tokens=("name","email","phone","mobile","location","city","country","linkedin","github","portfolio","website",
                  "resume","cv","cover","message","additional","authorization","authorized","sponsorship","salary",
                  "availability","start date")
@@ -249,7 +259,10 @@ def _sensitive_or_unknown_required(page):
                 field.get_attribute("id"),
                 field.get_attribute("placeholder"),
                 field.get_attribute("aria-label"),
+                field.get_attribute("data-testid"),
             ])).lower()
+            if "newsletter" in ident:
+                continue
             if not any(tok in ident for tok in safe_tokens):
                 try:
                     html=(field.evaluate("(el)=>el.outerHTML") or "")[:240]
