@@ -177,10 +177,11 @@ def _fill_standard_fields(page,profile,draft,resume_path):
     _fill(page,r"portfolio|website|personal.?site",profile.get("portfolio",""))
     _fill(page,r"cover.?letter|message|additional information",draft)
 
+    _fill_css(page,['input[data-testid="apply-name"]','input[name="name"]','input[name*="full_name" i]'],name)
     _fill_css(page,['input[name*="first" i]'],first)
     _fill_css(page,['input[name*="last" i]','input[name*="surname" i]'],last)
-    _fill_css(page,['input[type="email"]','input[name*="email" i]'],profile.get("email",""))
-    _fill_css(page,['input[type="tel"]','input[name*="phone" i]','input[name*="mobile" i]'],profile.get("phone",""))
+    _fill_css(page,['input[type="email"]','input[data-testid="apply-email"]','input[name*="email" i]'],profile.get("email",""))
+    _fill_css(page,['input[type="tel"]','input[data-testid="apply-phone"]','input[name*="phone" i]','input[name*="mobile" i]'],profile.get("phone",""))
     _fill_css(page,['input[name*="linkedin" i]'],profile.get("linkedin",""))
     _fill_css(page,['input[name*="github" i]'],profile.get("github",""))
     _fill_css(page,['input[name*="portfolio" i]','input[name*="website" i]'],profile.get("portfolio",""))
