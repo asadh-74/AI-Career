@@ -91,3 +91,37 @@ The worker does not use an AI-detector evasion service. It performs a small writ
 Copy the new variables from `backend/.env.example`. For GitHub Actions, configure repository secrets for the hosted `DATABASE_URL`, Gemini key, verified `APPLICANT_PROFILE_JSON`, and optional SMTP credentials. Configure repository variables such as `AUTO_APPLY`, `MIN_MATCH_SCORE`, `MAX_APPLICATIONS_PER_DAY`, and `AUTO_SUBMIT_BROWSER`.
 
 For Gmail SMTP, use an account-specific credential rather than your normal Google password. Do not commit credentials to the repository.
+
+
+## Career Atlas Automation v3
+
+Career Atlas v3 keeps the existing jobs/applications tables and adds an additive intelligence layer around them.
+
+### v3 capabilities
+
+- **ATS adapters:** deterministic field targeting for Greenhouse, Lever, Ashby, SmartRecruiters, Workday and generic employer forms.
+- **Form memory:** unknown non-sensitive fields are recorded by host and can be mapped to verified profile keys for later applications. Sensitive fields are never written into normal field memory.
+- **Tailored resume variants:** generates a per-job PDF using only text already present in the uploaded resume; it reorders verified material and never invents achievements.
+- **Multidimensional matching:** stores technical, experience, location, seniority, education, salary, form difficulty and application-probability scores.
+- **Application probability:** combines fit and form difficulty so easy, strong applications can be attempted before difficult low-value forms.
+- **CrewAI research layer:** three-agent source/eligibility/ranking research is available when `CREWAI_LLM` is configured. A deterministic research fallback is used otherwise so normal runs stay fast and cheap.
+- **Official source expansion:** company sources can use Greenhouse, Lever, Ashby and SmartRecruiters feeds. Public remote boards remain supported.
+- **Duplicate protection:** source-level duplicate checks plus normalized cross-board fingerprints prevent repeated submissions to equivalent roles.
+- **Reusable profile answers:** verified non-sensitive answers are reused through field memory. Country-specific legal wording still stops for review rather than being inferred.
+- **Smart retries:** failures are classified (timeout, selector, CAPTCHA, assessment, confirmation, sensitive field, unknown field, etc.) and recoverable failures receive one bounded retry.
+- **Submission evidence:** Playwright stores before/after submission screenshots in PostgreSQL when a submission attempt reaches the final button.
+- **Pipeline tracking:** application events use discovered → matched → prepared → applying → submitted → employer viewed → interview/rejected/offer.
+- **Recruiter inbox monitor:** optional IMAP monitoring classifies recruiter replies without marking messages read and updates the application pipeline.
+- **Follow-up drafts:** after five days with no reply, Career Atlas prepares a follow-up draft but does not send it automatically.
+- **Interview mode:** interview replies create a role-specific preparation brief grounded in the job description and uploaded resume.
+- **Whole-form diagnostics:** unresolved form fields are collected together so one adapter update can fix several blockers at once.
+- **Sensitive-profile separation:** protected/demographic answers can only come from a separate private `SENSITIVE_PROFILE_JSON`; nothing is inferred from name, location or other profile fields.
+- **Daily strategy engine:** candidate roles are diversified across backend, AI/automation, full-stack, software, data and embedded categories before application attempts.
+- **Quality modes:** Conservative (85+), Balanced (75+) and Aggressive (65+) are persisted in the database and selectable from the Dashboard.
+- **Live dashboard:** shows pipeline counts, top opportunity probabilities, recruiter messages, follow-up drafts and recent LangGraph events.
+
+### Safety and submission guarantees
+
+Career Atlas never bypasses CAPTCHA/anti-bot checks or employer assessments. It does not fabricate experience, education, legal eligibility or protected-trait answers. A job is only written as `submitted` after a confirmation phrase or confirmation URL is detected, or after the user manually records an employer confirmation.
+
+The current production worker uses LangGraph for the score gate → email route → browser route → fallback → terminal state sequence. A real Pakistan-calendar-day cap is enforced from confirmed submissions rather than from jobs merely processed during one run.
