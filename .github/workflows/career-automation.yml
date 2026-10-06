@@ -2,6 +2,10 @@ name: Career Atlas Automation
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/career-automation.yml"
   schedule:
     # 05:30 and 07:30 Pakistan time (UTC+5)
     - cron: "30 0 * * *"
