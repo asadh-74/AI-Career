@@ -1,4 +1,4 @@
-# v3-integration: final-v1
+# v3-integration: privacy-crewai-final
 name: Career Atlas Automation
 
 on:
@@ -41,6 +41,7 @@ jobs:
       TAILOR_RESUME: "true"
       ENABLE_EMAIL_MONITOR: "true"
       IMAP_HOST: "imap.gmail.com"
+      CREWAI_LLM: "gemini/gemini-2.5-flash"
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
