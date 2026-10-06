@@ -49,6 +49,15 @@ def load_profile():
         data=json.loads(raw); return data if isinstance(data,dict) else {}
     except json.JSONDecodeError:return {}
 
+def load_sensitive_profile():
+    """Explicit protected/demographic answers live separately from normal profile memory."""
+    raw=os.getenv("SENSITIVE_PROFILE_JSON","").strip()
+    if not raw:return {}
+    try:
+        data=json.loads(raw);return data if isinstance(data,dict) else {}
+    except json.JSONDecodeError:return {}
+
+
 def find_application_email(text):
     candidates=re.findall(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",text or "")
     for address in candidates:
@@ -124,6 +133,24 @@ def _select_known_answer(page,label_pattern,value):
         if option.count():option.first.click();return True
     except Exception:pass
     return False
+
+def _fill_explicit_sensitive_answers(page):
+    profile=load_sensitive_profile()
+    if not profile:return []
+    filled=[]
+    # Never infer these values. They are used only when explicitly provided in
+    # the separate SENSITIVE_PROFILE_JSON runtime secret.
+    mappings=(
+        ("gender",r"gender"),
+        ("race_ethnicity",r"race|ethnicity"),
+        ("veteran_status",r"veteran"),
+        ("disability_status",r"disability"),
+    )
+    for key,pattern in mappings:
+        value=profile.get(key)
+        if value and _select_known_answer(page,pattern,value):
+            filled.append(key)
+    return filled
 
 def _stop_signal(page):
     text=(page.locator("body").inner_text(timeout=5000) or "")[:30000].lower()
@@ -258,7 +285,7 @@ def _fill_learned_answers(page,learned_answers):
             pass
     return filled
 
-def _sensitive_or_unknown_required(page):
+def _sensitive_or_unknown_required(page,sensitive_filled=None):
     root=application_root(page)
     blockers=[]
 
@@ -266,6 +293,10 @@ def _sensitive_or_unknown_required(page):
     for i in range(min(labels.count(),120)):
         text=(labels.nth(i).inner_text() or "").strip()
         if text and needs_human(text):
+            low=text.lower()
+            explicit=sensitive_filled or []
+            if ("gender" in low and "gender" in explicit) or (("race" in low or "ethnicity" in low) and "race_ethnicity" in explicit) or ("veteran" in low and "veteran_status" in explicit) or ("disability" in low and "disability_status" in explicit):
+                continue
             blockers.append(f"Sensitive/uncertain question: {text[:180]}")
 
     required=root.locator("input[required], textarea[required], select[required]")
@@ -353,7 +384,8 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                     _fill_standard_fields(page,profile,draft,resume_path)
                     ats_info=fill_ats_fields(page,page.url,profile,draft,resume_path)
                     learned_filled=_fill_learned_answers(page,learned_answers)
-                    blocker=_sensitive_or_unknown_required(page)
+                    sensitive_filled=_fill_explicit_sensitive_answers(page)
+                    blocker=_sensitive_or_unknown_required(page,sensitive_filled)
                     if blocker:return {"status":"needs_human","reason":blocker}
 
                     if not AutomationConfig.from_env().auto_submit_browser:
