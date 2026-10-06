@@ -107,6 +107,25 @@ class _WorkspaceState extends State<Workspace> {
       message('$company added. Tap Find jobs to scan its open roles.');
     } catch (e) { message('$e'); }
   }
+  Future<void> setQuality(String mode) async {
+    try { final r=await api.request('POST','v3/settings/quality',{'mode':mode}); setState(()=>qualityMode=mode); await reload(); message('Quality mode: $mode · threshold ${r['threshold']}'); }
+    catch(e){message('$e');}
+  }
+  Future<void> showEvidence(int applicationId) async {
+    try {
+      final items=(await api.request('GET','v3/artifacts/$applicationId') as List);
+      if(items.isEmpty){message('No submission screenshots stored for this application.');return;}
+      final widgets=<Widget>[];
+      for(final item in items){
+        final bytes=await api.getBytes('v3/artifacts/file/${item['id']}');
+        widgets.add(Padding(padding:const EdgeInsets.only(bottom:14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+          Text('${item['kind']} · ${item['createdAt']}',style:const TextStyle(fontWeight:FontWeight.w600)),
+          const SizedBox(height:6),ClipRRect(borderRadius:BorderRadius.circular(10),child:Image.memory(bytes,width:720,fit:BoxFit.fitWidth))
+        ])));
+      }
+      if(mounted)showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Submission evidence'),content:SizedBox(width:760,child:SingleChildScrollView(child:Column(children:widgets))),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close'))]));
+    }catch(e){message('$e');}
+  }
   Future<void> confirmApplication(Map application) async {
     final receipt=TextEditingController();
     await showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Record submitted application'),content:Column(mainAxisSize:MainAxisSize.min,children:[
