@@ -260,12 +260,13 @@ def _fill_learned_answers(page,learned_answers):
 
 def _sensitive_or_unknown_required(page):
     root=application_root(page)
+    blockers=[]
 
     labels=root.locator("label")
     for i in range(min(labels.count(),120)):
         text=(labels.nth(i).inner_text() or "").strip()
         if text and needs_human(text):
-            return f"Sensitive/uncertain question: {text[:180]}"
+            blockers.append(f"Sensitive/uncertain question: {text[:180]}")
 
     required=root.locator("input[required], textarea[required], select[required]")
     safe_tokens=("name","email","phone","mobile","location","city","country","linkedin","github","portfolio","website",
@@ -279,21 +280,23 @@ def _sensitive_or_unknown_required(page):
             value=(field.input_value() or "").strip()
             if value:continue
             ident=" ".join(filter(None,[
-                field.get_attribute("name"),
-                field.get_attribute("id"),
-                field.get_attribute("placeholder"),
-                field.get_attribute("aria-label"),
-                field.get_attribute("data-testid"),
+                field.get_attribute("name"),field.get_attribute("id"),field.get_attribute("placeholder"),
+                field.get_attribute("aria-label"),field.get_attribute("data-testid"),
             ])).lower()
-            if "newsletter" in ident:
-                continue
+            if "newsletter" in ident:continue
             if not any(tok in ident for tok in safe_tokens):
-                try:
-                    html=(field.evaluate("(el)=>el.outerHTML") or "")[:240]
-                except Exception:
-                    html=""
-                return f"Unknown required field: {ident[:180] or 'unlabelled required field'} {html}"
+                try:html=(field.evaluate("(el)=>el.outerHTML") or "")[:220]
+                except Exception:html=""
+                blockers.append(f"Unknown required field: {ident[:160] or 'unlabelled required field'} {html}")
         except Exception:pass
+
+    if blockers:
+        # Return all unique blockers so the next adapter/memory update can fix
+        # the entire form in one iteration rather than one field at a time.
+        unique=[]
+        for b in blockers:
+            if b not in unique:unique.append(b)
+        return " | ".join(unique[:12])
     return None
 
 def _find_submit(page):
