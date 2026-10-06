@@ -137,7 +137,42 @@ class _WorkspaceState extends State<Workspace> {
       catch(e){message('$e');}
     },child:const Text('Mark applied'))]));receipt.dispose();
   }
-  @override Widget build(BuildContext context){final wide=MediaQuery.sizeOf(context).width>720;final filtered=jobs.where((x){final matchesText='${x['title']} ${x['company']} ${x['location']}'.toLowerCase().contains(query.trim().toLowerCase());final matchesStatus=statusFilter=='all'||statusFor(x['id'] as int)==statusFilter;return matchesText&&matchesStatus;}).toList();return Scaffold(appBar:AppBar(title:const Text('✦ Career Atlas',style:TextStyle(fontWeight:FontWeight.bold)),actions:[IconButton(tooltip:'Refresh',onPressed:reload,icon:const Icon(Icons.refresh)),IconButton(tooltip:'Sign out',onPressed:(){api.token=null;Navigator.of(context).pushReplacement(MaterialPageRoute(builder:(_)=>const Gate()));},icon:const Icon(Icons.logout))]),bottomNavigationBar:wide?null:NavigationBar(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),destinations:const [NavigationDestination(icon:Icon(Icons.work_outline),label:'Jobs'),NavigationDestination(icon:Icon(Icons.approval_outlined),label:'Applications'),NavigationDestination(icon:Icon(Icons.check_circle_outline),label:'Submitted'),NavigationDestination(icon:Icon(Icons.settings_outlined),label:'Setup')]),body:Row(children:[if(wide)NavigationRail(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),labelType:NavigationRailLabelType.all,destinations:const [NavigationRailDestination(icon:Icon(Icons.work_outline),label:Text('Jobs')),NavigationRailDestination(icon:Icon(Icons.approval_outlined),label:Text('Applications')),NavigationRailDestination(icon:Icon(Icons.check_circle_outline),label:Text('Submitted')),NavigationRailDestination(icon:Icon(Icons.settings_outlined),label:Text('Setup'))]),Expanded(child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:1100),child:Padding(padding:const EdgeInsets.all(16),child:switch(tab){0=>jobsView(filtered),1=>applicationsView(),2=>submittedView(),_=>setupView()}))))]));}
+  @override Widget build(BuildContext context){
+    final wide=MediaQuery.sizeOf(context).width>760;
+    final filtered=jobs.where((x){
+      final matchesText='${x['title']} ${x['company']} ${x['location']}'.toLowerCase().contains(query.trim().toLowerCase());
+      final matchesStatus=statusFilter=='all'||statusFor(x['id'] as int)==statusFilter;
+      return matchesText&&matchesStatus;
+    }).toList();
+    const destinations=[
+      NavigationDestination(icon:Icon(Icons.work_outline),label:'Jobs'),
+      NavigationDestination(icon:Icon(Icons.approval_outlined),label:'Applications'),
+      NavigationDestination(icon:Icon(Icons.check_circle_outline),label:'Submitted'),
+      NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Dashboard'),
+      NavigationDestination(icon:Icon(Icons.settings_outlined),label:'Setup'),
+    ];
+    const rail=[
+      NavigationRailDestination(icon:Icon(Icons.work_outline),label:Text('Jobs')),
+      NavigationRailDestination(icon:Icon(Icons.approval_outlined),label:Text('Applications')),
+      NavigationRailDestination(icon:Icon(Icons.check_circle_outline),label:Text('Submitted')),
+      NavigationRailDestination(icon:Icon(Icons.dashboard_outlined),label:Text('Dashboard')),
+      NavigationRailDestination(icon:Icon(Icons.settings_outlined),label:Text('Setup')),
+    ];
+    return Scaffold(
+      appBar:AppBar(title:const Text('✦ Career Atlas',style:TextStyle(fontWeight:FontWeight.bold)),actions:[
+        IconButton(tooltip:'Refresh',onPressed:reload,icon:const Icon(Icons.refresh)),
+        IconButton(tooltip:'Sign out',onPressed:(){api.token=null;Navigator.of(context).pushReplacement(MaterialPageRoute(builder:(_)=>const Gate()));},icon:const Icon(Icons.logout))
+      ]),
+      bottomNavigationBar:wide?null:NavigationBar(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),destinations:destinations),
+      body:Row(children:[
+        if(wide)NavigationRail(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),labelType:NavigationRailLabelType.all,destinations:rail),
+        Expanded(child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:1180),child:Padding(
+          padding:const EdgeInsets.all(16),
+          child:switch(tab){0=>jobsView(filtered),1=>applicationsView(),2=>submittedView(),3=>dashboardView(),_=>setupView()}
+        ))))
+      ])
+    );
+  }
   Widget jobsView(List<dynamic> filtered)=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Row(children:[Expanded(child:Text('${jobs.length} company jobs',style:Theme.of(context).textTheme.headlineSmall)),FilledButton.icon(onPressed:busy?null:scan,icon:const Icon(Icons.auto_awesome),label:Text(busy?'Scanning…':'Find jobs'))]),
     const SizedBox(height:12),TextField(onChanged:(x)=>setState(()=>query=x),decoration:const InputDecoration(prefixIcon:Icon(Icons.search),hintText:'Search roles, companies or locations',filled:true,border:OutlineInputBorder())),
