@@ -13,5 +13,5 @@ playwright>=1.55,<2
 selenium>=4.35,<5
 
 langgraph>=0.6,<1
-crewai==1.15.22
+crewai[google-genai]==1.15.22
 reportlab==5.0.1
