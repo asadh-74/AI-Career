@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -32,6 +33,11 @@ class Api {
     return data;
   }
   Future<void> login(String password) async { token = (await request('POST', 'auth/login', {'password': password}))['token']; }
+  Future<Uint8List> getBytes(String path) async {
+    final r=await http.get(uri(path),headers:{if(token!=null)'Authorization':'Bearer $token'});
+    if(r.statusCode>=400)throw Exception('Download failed');
+    return r.bodyBytes;
+  }
   Future<void> upload(String kind, PlatformFile file) async {
     final req = http.MultipartRequest('POST', uri('documents'));
     req.headers['Authorization'] = 'Bearer $token';
@@ -68,9 +74,12 @@ class _GateState extends State<Gate> {
 
 class Workspace extends StatefulWidget { const Workspace({super.key}); @override State<Workspace> createState()=>_WorkspaceState(); }
 class _WorkspaceState extends State<Workspace> {
-  int tab=0; bool busy=false; List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[]; String query='', statusFilter='all';
+  int tab=0; bool busy=false;
+  List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[];
+  Map<String,dynamic> dashboard={};
+  String query='', statusFilter='all', qualityMode='balanced';
   @override void initState(){super.initState();reload();}
-  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];});}catch(e){message('$e');} }
+  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
   Future<void> scan() async {setState(()=>busy=true);try{final result=await api.request('POST','scan');await reload();final errors=(result['errors'] as List).cast<String>();message('Added ${result['added']} jobs.${errors.isEmpty?'':' Board errors: ${errors.join(', ')}'}');}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
   Future<void> open(String url) async {final uri=Uri.tryParse(url);if(uri!=null && ['https','http'].contains(uri.scheme))await launchUrl(uri,mode:LaunchMode.externalApplication);}
