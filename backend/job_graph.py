@@ -23,6 +23,7 @@ class ApplicationState(TypedDict, total=False):
     draft: str
     result: dict
     route: str
+    learned_answers: list
 
 
 def _score_gate(state: ApplicationState) -> ApplicationState:
@@ -80,7 +81,7 @@ def _browser_attempt(state: ApplicationState) -> ApplicationState:
         }
 
     draft = naturalize_draft(job, state.get("draft", ""))
-    result = apply_with_playwright(job.apply_url, doc.pdf, doc.filename, draft)
+    result = apply_with_playwright(job.apply_url, doc.pdf, doc.filename, draft, state.get("learned_answers") or [])
 
     if result.get("status") == "failed":
         fallback = apply_with_selenium(job.apply_url, doc.pdf, doc.filename, draft)
@@ -117,7 +118,7 @@ _builder.add_edge("browser", END)
 APPLICATION_GRAPH = _builder.compile()
 
 
-def run_application_graph(job, doc, cfg, score: int, draft: str) -> dict:
+def run_application_graph(job, doc, cfg, score: int, draft: str, learned_answers=None) -> dict:
     state = APPLICATION_GRAPH.invoke(
         {
             "job": job,
@@ -125,6 +126,7 @@ def run_application_graph(job, doc, cfg, score: int, draft: str) -> dict:
             "cfg": cfg,
             "score": score,
             "draft": draft,
+            "learned_answers": learned_answers or [],
         }
     )
     return state.get("result") or {
