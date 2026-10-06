@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlparse
+from ats_adapters import ats_name, fill_ats_fields, application_root
 
-SENSITIVE_PATTERNS=("authorized to work","work authorization","visa sponsorship","sponsorship",
-"security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity",
-"salary expectation","expected salary","desired salary","assessment","test","captcha")
+SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity",
+"assessment","test","captcha")
+LEGAL_JURISDICTION_TERMS=("united states","u.s.","usa","united kingdom","uk","european union","eu citizen","canada","australia")
 
 @dataclass
 class AutomationConfig:
@@ -57,7 +58,13 @@ def find_application_email(text):
 
 def needs_human(question):
     q=(question or "").lower()
-    return any(x in q for x in SENSITIVE_PATTERNS)
+    if any(x in q for x in SENSITIVE_PATTERNS):
+        return True
+    # Generic authorization/sponsorship can use an explicit profile answer.
+    # Jurisdiction-specific legal eligibility must never be inferred.
+    if any(x in q for x in ("authorized to work","work authorization","visa sponsorship","sponsorship")):
+        return any(x in q for x in LEGAL_JURISDICTION_TERMS)
+    return False
 
 def email_subject(job):
     name=load_profile().get("name","Applicant")
@@ -226,16 +233,33 @@ def _fill_standard_fields(page,profile,draft,resume_path):
                 cb.check()
         except Exception:pass
 
+def _fill_learned_answers(page,learned_answers):
+    filled=[]
+    for item in learned_answers or []:
+        value=item.get("value")
+        if value in (None,""):continue
+        selector=item.get("selector_hint") or ""
+        label=item.get("label") or ""
+        try:
+            if selector:
+                loc=page.locator(selector)
+                if loc.count() and loc.first.is_visible():
+                    tag=loc.first.evaluate("(el)=>el.tagName.toLowerCase()")
+                    typ=(loc.first.get_attribute("type") or "").lower()
+                    if tag=="select":
+                        try:loc.first.select_option(label=re.compile(rf"^{re.escape(str(value))}$",re.I));filled.append(label);continue
+                        except Exception:pass
+                    if typ in ("checkbox","radio"):
+                        if bool(value):loc.first.check();filled.append(label);continue
+                    loc.first.fill(str(value));filled.append(label);continue
+            if label and _fill(page,re.escape(label),value):
+                filled.append(label)
+        except Exception:
+            pass
+    return filled
+
 def _sensitive_or_unknown_required(page):
-    root=page
-    try:
-        submit=_find_submit(page)
-        if submit is not None:
-            form=submit.locator("xpath=ancestor::form[1]")
-            if form.count():
-                root=form.first
-    except Exception:
-        pass
+    root=application_root(page)
 
     labels=root.locator("label")
     for i in range(min(labels.count(),120)):
@@ -295,7 +319,7 @@ def _find_next(page):
         except Exception:pass
     return None
 
-def apply_with_playwright(url,pdf,filename,draft):
+def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
     profile=load_profile()
     if not profile:return {"status":"needs_human","reason":"APPLICANT_PROFILE_JSON is not configured"}
     try:from playwright.sync_api import sync_playwright
@@ -324,6 +348,8 @@ def apply_with_playwright(url,pdf,filename,draft):
                     if signal:return {"status":"needs_human","reason":signal}
 
                     _fill_standard_fields(page,profile,draft,resume_path)
+                    ats_info=fill_ats_fields(page,page.url,profile,draft,resume_path)
+                    learned_filled=_fill_learned_answers(page,learned_answers)
                     blocker=_sensitive_or_unknown_required(page)
                     if blocker:return {"status":"needs_human","reason":blocker}
 
@@ -333,20 +359,25 @@ def apply_with_playwright(url,pdf,filename,draft):
                     submit=_find_submit(page)
                     if submit is not None:
                         before=page.url
+                        try:pre_shot=page.screenshot(full_page=True)
+                        except Exception:pre_shot=b""
                         submit.click()
                         page.wait_for_timeout(4500)
+                        try:post_shot=page.screenshot(full_page=True)
+                        except Exception:post_shot=b""
                         final=(page.locator("body").inner_text(timeout=7000) or "").lower()
                         confirmations=(
                             "application submitted","thank you for applying","application received",
                             "thanks for applying","successfully submitted","we have received your application",
                             "your application has been submitted","thank you for your application",
                         )
+                        meta={"ats":ats_info.get("ats","generic"),"learnedFields":learned_filled}
                         if any(x in final for x in confirmations):
-                            return {"status":"applied","receipt":page.url}
+                            return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
                         # Some ATS pages navigate to a confirmation URL with little text.
                         if page.url!=before and any(x in page.url.lower() for x in ("thank","success","confirmation","submitted")):
-                            return {"status":"applied","receipt":page.url}
-                        return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected"}
+                            return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
+                        return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected","pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
                     nxt=_find_next(page)
                     if nxt is not None:
