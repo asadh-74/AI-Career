@@ -28,8 +28,12 @@ jobs:
       ALLOW_INDEED: "false"
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
-      TARGET_JOB_ID: "727"
-      APPLICANT_GENDER: "Male"
+      TARGET_JOB_URL: "https://afterrealism.com/careers/backend-developer"
+      TARGET_JOB_TITLE: "Backend Developer (Python)"
+      TARGET_JOB_COMPANY: "After Realism"
+      TARGET_JOB_LOCATION: "Pakistan / Remote"
+      TARGET_JOB_PROVIDER: "Indeed"
+      TARGET_JOB_DESCRIPTION: "Python backend development role using FastAPI, PostgreSQL/PostGIS, cloud-native pipelines and scalable APIs. Listing requests 2+ years of Python backend experience."
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
