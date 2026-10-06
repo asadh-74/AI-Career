@@ -317,9 +317,10 @@ def run():
                 research.eligibility_notes=deep["eligibility_notes"]
                 research.quality_score=int(deep["quality_score"])
                 research.source=deep["source"]
-                record_event(session,job.id,"matched","deep_research",
-                             f"CrewAI research: {research.quality_score}/100 ({research.source}).",
-                             application_id=existing.id)
+                detail=f"CrewAI research: {research.quality_score}/100 ({research.source})."
+                if deep.get("crew_error"):
+                    detail+=f" Fallback reason: {deep['crew_error']}"
+                record_event(session,job.id,"matched","deep_research",detail,application_id=existing.id)
 
             if duplicate_already_submitted(session,metric,job.id):
                 stats["duplicatesSkipped"]+=1
