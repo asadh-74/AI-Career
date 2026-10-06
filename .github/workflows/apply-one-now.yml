@@ -28,7 +28,12 @@ jobs:
       ALLOW_INDEED: "true"
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
-      TARGET_JOB_ID: "334"
+      TARGET_JOB_URL: "https://www.cloudlabweb.com/careers/junior-full-stack-engineer"
+      TARGET_JOB_TITLE: "Junior Full-Stack Engineer"
+      TARGET_JOB_COMPANY: "CloudLab Technologies"
+      TARGET_JOB_LOCATION: "Karachi, Pakistan / Remote"
+      TARGET_JOB_PROVIDER: "Indeed"
+      TARGET_JOB_DESCRIPTION: "Full-time remote junior full-stack engineering role for candidates 0-2 years out. Requires solid CS fundamentals, a non-trivial shipped project, React and a modern backend such as Python, Node or Go, with interest in AI/LLM engineering."
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
