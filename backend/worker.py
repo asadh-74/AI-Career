@@ -170,7 +170,11 @@ def process_recruiter_mail(session,doc,stats):
     except Exception as exc:
         stats["emailMonitorError"]=f"{type(exc).__name__}: {str(exc)[:120]}";return
     if not messages:return
-    pairs=session.execute(select(Application,Job).join(Job,Job.id==Application.job_id)).all()
+    pairs=session.execute(
+        select(Application,Job)
+        .join(Job,Job.id==Application.job_id)
+        .where(Application.status=="applied")
+    ).all()
 
     # Revalidate records imported by earlier matcher versions. Keep only
     # messages that still have strong evidence for their linked application.
