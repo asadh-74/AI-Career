@@ -52,7 +52,7 @@ def fetch_recent_messages(limit:int=25)->list[dict]:
         if status!="OK":return []
         ids=(data[0].split() if data and data[0] else [])[-limit:]
         for mid in ids:
-            status,msgdata=conn.fetch(mid,"(RFC822)")
+            status,msgdata=conn.fetch(mid,"(BODY.PEEK[])")
             if status!="OK" or not msgdata:continue
             raw=next((x[1] for x in msgdata if isinstance(x,tuple)),b"")
             msg=email.message_from_bytes(raw)
