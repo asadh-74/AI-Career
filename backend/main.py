@@ -139,9 +139,11 @@ def add_source(body: SourceIn, session: Session=Depends(db)):
         if host in ('boards.greenhouse.io','job-boards.greenhouse.io'): provider='Greenhouse'
         elif host == 'jobs.lever.co': provider='Lever'
         elif host == 'jobs.eu.lever.co': provider='LeverEU'
-        else: raise HTTPException(400,'This website has no supported public board feed yet; supported: Greenhouse and Lever')
+        elif host == 'jobs.ashbyhq.com': provider='Ashby'
+        elif host == 'careers.smartrecruiters.com': provider='SmartRecruiters'
+        else: raise HTTPException(400,'Supported public board feeds: Greenhouse, Lever, Ashby, SmartRecruiters')
         slug=parsed.path.strip('/').split('/')[0]
-    if provider not in ('Greenhouse','Lever','LeverEU'): raise HTTPException(400, 'Supported company feeds: Greenhouse and Lever')
+    if provider not in ('Greenhouse','Lever','LeverEU','Ashby','SmartRecruiters'): raise HTTPException(400, 'Supported company feeds: Greenhouse, Lever, Ashby, SmartRecruiters')
     if not re.fullmatch(r'[a-zA-Z0-9_-]{2,100}', slug): raise HTTPException(400, 'Invalid board slug')
     existing=session.scalar(select(Source).where(Source.provider==provider,Source.slug==slug))
     if existing: return source_out(existing)
@@ -158,9 +160,28 @@ def fetch_board(client, source):
     if source.provider=='Greenhouse':
         r=client.get(f'https://boards-api.greenhouse.io/v1/boards/{source.slug}/jobs',params={'content':'true'});r.raise_for_status()
         return [dict(company=source.company,title=x.get('title',''),location=(x.get('location') or {}).get('name',''),description=re.sub('<[^>]+>',' ',x.get('content') or '')[:8000],url=x.get('absolute_url',''),apply_url=x.get('absolute_url',''),provider='Greenhouse') for x in r.json().get('jobs',[])]
-    host='api.eu.lever.co' if source.provider=='LeverEU' else 'api.lever.co'
-    r=client.get(f'https://{host}/v0/postings/{source.slug}',params={'mode':'json'});r.raise_for_status()
-    return [dict(company=source.company,title=x.get('text',''),location=(x.get('categories') or {}).get('location',''),description=(x.get('descriptionPlain') or '')[:8000],url=x.get('hostedUrl',''),apply_url=x.get('applyUrl') or x.get('hostedUrl',''),provider=source.provider) for x in r.json()]
+    if source.provider in ('Lever','LeverEU'):
+        host='api.eu.lever.co' if source.provider=='LeverEU' else 'api.lever.co'
+        r=client.get(f'https://{host}/v0/postings/{source.slug}',params={'mode':'json'});r.raise_for_status()
+        return [dict(company=source.company,title=x.get('text',''),location=(x.get('categories') or {}).get('location',''),description=(x.get('descriptionPlain') or '')[:8000],url=x.get('hostedUrl',''),apply_url=x.get('applyUrl') or x.get('hostedUrl',''),provider=source.provider) for x in r.json()]
+    if source.provider=='Ashby':
+        r=client.get(f'https://api.ashbyhq.com/posting-api/job-board/{source.slug}',params={'includeCompensation':'true'});r.raise_for_status()
+        rows=[]
+        for x in r.json().get('jobs',[]):
+            url=x.get('jobUrl') or x.get('url') or x.get('applyUrl') or ''
+            rows.append(dict(company=source.company,title=x.get('title',''),location=x.get('location') or '',description=re.sub('<[^>]+>',' ',x.get('descriptionHtml') or x.get('descriptionPlain') or x.get('description') or '')[:8000],url=url,apply_url=x.get('applyUrl') or url,provider='Ashby'))
+        return rows
+    if source.provider=='SmartRecruiters':
+        r=client.get(f'https://api.smartrecruiters.com/v1/companies/{source.slug}/postings',params={'limit':100,'locationType':'ANY'});r.raise_for_status()
+        rows=[]
+        for x in r.json().get('content',[]):
+            loc=x.get('location') or {}
+            location=', '.join(str(v) for v in (loc.get('city'),loc.get('region'),loc.get('country')) if v) if isinstance(loc,dict) else str(loc)
+            url=x.get('applyUrl') or x.get('jobAdUrl') or x.get('ref') or ''
+            desc=x.get('jobAd',{}).get('sections',{}).get('jobDescription',{}).get('text','') if isinstance(x.get('jobAd'),dict) else ''
+            rows.append(dict(company=source.company,title=x.get('name') or x.get('title') or '',location=location,description=re.sub('<[^>]+>',' ',desc)[:8000],url=url,apply_url=x.get('applyUrl') or url,provider='SmartRecruiters'))
+        return rows
+    return []
 
 def scan(session, client):
     added=0; errors=[]
