@@ -37,6 +37,9 @@ jobs:
       ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
       ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
       AUTO_SUBMIT_BROWSER: "true"
+      TAILOR_RESUME: "true"
+      ENABLE_EMAIL_MONITOR: "true"
+      IMAP_HOST: "imap.gmail.com"
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
