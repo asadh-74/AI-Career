@@ -76,12 +76,22 @@ def fetch_recent_messages(limit:int=25)->list[dict]:
 
 
 def match_application(message,applications_with_jobs):
-    text=(message.get("subject","")+" "+message.get("body","")).lower()
+    text=(message.get("sender","")+" "+message.get("subject","")+" "+message.get("body","")).lower()
+    generic={"software","engineer","developer","remote","application","job","role","team","hiring","career","full","stack","backend","frontend"}
     best=None;best_score=0
     for app,job in applications_with_jobs:
-        score=0
-        for token in re.findall(r"[a-z0-9]{4,}",(job.company+" "+job.title).lower()):
-            if token in text:score+=1
+        company_tokens=[t for t in re.findall(r"[a-z0-9]{3,}",(job.company or "").lower()) if t not in {"technologies","technology","solutions","company","labs","group","inc","ltd"}]
+        role_tokens=[t for t in re.findall(r"[a-z0-9]{4,}",(job.title or "").lower()) if t not in generic]
+        company_hits=sum(1 for t in company_tokens if t in text)
+        role_hits=sum(1 for t in role_tokens if t in text)
+        # Prefer explicit company evidence. Without it, require several
+        # distinctive title terms so generic newsletters do not get matched.
+        if company_hits:
+            score=5*company_hits+role_hits
+        elif role_hits>=3:
+            score=role_hits
+        else:
+            score=0
         if score>best_score:
             best=(app,job);best_score=score
-    return best if best_score>=1 else None
+    return best if best_score>=3 else None
