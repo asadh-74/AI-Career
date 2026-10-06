@@ -94,7 +94,7 @@ class _WorkspaceState extends State<Workspace> {
     final company=TextEditingController(),website=TextEditingController();
     await showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Add company careers page'),content:Column(mainAxisSize:MainAxisSize.min,children:[
       TextField(controller:company,decoration:const InputDecoration(labelText:'Company name')),
-      TextField(controller:website,decoration:const InputDecoration(labelText:'Greenhouse or Lever careers URL',hintText:'https://jobs.lever.co/company')),
+      TextField(controller:website,decoration:const InputDecoration(labelText:'Greenhouse, Lever, Ashby or SmartRecruiters URL',hintText:'https://jobs.ashbyhq.com/company')),
     ]),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Cancel')),FilledButton(onPressed:()async{
       try{await api.request('POST','sources',{'company':company.text,'website':website.text.trim()});if(c.mounted)Navigator.pop(c);await reload();}
       catch(e){message('$e');}
@@ -261,9 +261,59 @@ class _WorkspaceState extends State<Workspace> {
             Text('Submitted: ${a['submittedAt']}'),
             if((a['receipt']??'').toString().isNotEmpty) Text('Receipt: ${a['receipt']}'),
             const SizedBox(height:8),
-            OutlinedButton(onPressed:()=>open(a['applyUrl']),child:const Text('View job ↗')),
+            Wrap(spacing:8,children:[OutlinedButton(onPressed:()=>open(a['applyUrl']),child:const Text('View job ↗')),OutlinedButton(onPressed:()=>showEvidence(a['applicationId'] as int),child:const Text('Evidence'))]),
           ])));
         }))
   ]);
-  Widget setupView()=>ListView(children:[Text('Your setup',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:14),const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),const Text('Paste a Greenhouse or Lever careers URL to add another board. On this Free Render deployment, boards are scanned when you tap Find jobs. Employer forms require your review and confirmation.')]);
+  Widget _statCard(String label,Object? value,IconData icon)=>SizedBox(width:170,child:Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+    Icon(icon,color:violet),const SizedBox(height:8),Text('${value??0}',style:Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight:FontWeight.bold)),Text(label)
+  ]))));
+  Widget dashboardView()=>ListView(children:[
+    Row(children:[Expanded(child:Text('Automation Dashboard',style:Theme.of(context).textTheme.headlineSmall)),Chip(label:Text('Threshold ${dashboard['threshold']??75}+'))]),
+    const SizedBox(height:8),const Text('Live Career Atlas v3 pipeline: discovery, scoring, form automation, submission evidence and recruiter follow-up.'),
+    const SizedBox(height:12),
+    Wrap(spacing:10,runSpacing:10,children:[
+      _statCard('Jobs',dashboard['jobs'],Icons.work_outline),
+      _statCard('Applications',dashboard['applications'],Icons.description_outlined),
+      _statCard('Confirmed',dashboard['submitted'],Icons.check_circle_outline),
+      _statCard('Needs review',dashboard['needsAttention'],Icons.warning_amber_outlined),
+      _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
+    ]),
+    const SizedBox(height:18),Text('Quality mode',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:7),
+    Wrap(spacing:8,children:[
+      for(final mode in [('conservative','Conservative · 85+'),('balanced','Balanced · 75+'),('aggressive','Aggressive · 65+')])
+        ChoiceChip(label:Text(mode.$2),selected:qualityMode==mode.$1,onSelected:(_)=>setQuality(mode.$1))
+    ]),
+    const SizedBox(height:18),Text('Pipeline',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:7),
+    Wrap(spacing:8,runSpacing:8,children:[
+      for(final stage in ['discovered','matched','prepared','applying','submitted','employer_viewed','interview','rejected','offer'])
+        Chip(label:Text('${stage.replaceAll('_',' ')} · ${(dashboard['stageCounts'] as Map?)?[stage]??0}'))
+    ]),
+    const SizedBox(height:18),Text('Top opportunities',style:Theme.of(context).textTheme.titleMedium),
+    ...metrics.take(10).map((m)=>Card(child:ListTile(
+      title:Text('${m['title']} · ${m['company']}'),
+      subtitle:Text('Technical ${m['technical']} · Experience ${m['experience']} · Location ${m['location']} · Difficulty ${m['difficulty']}'),
+      trailing:Chip(label:Text('${m['probability']}%'))
+    ))),
+    const SizedBox(height:18),Text('Recruiter messages',style:Theme.of(context).textTheme.titleMedium),
+    if(messages.isEmpty)const Text('No recruiter replies detected yet.'),
+    ...messages.take(8).map((m)=>Card(child:ListTile(
+      leading:Icon(m['actionRequired']==true?Icons.mark_email_unread_outlined:Icons.email_outlined),
+      title:Text(m['subject']??''),
+      subtitle:Text('${m['classification']} · ${m['sender']}',maxLines:2,overflow:TextOverflow.ellipsis),
+      trailing:m['actionRequired']==true?const Chip(label:Text('Action')):null
+    ))),
+    const SizedBox(height:18),Text('Follow-up drafts',style:Theme.of(context).textTheme.titleMedium),
+    if(followups.isEmpty)const Text('Follow-ups are prepared after 5 days with no recruiter response.'),
+    ...followups.take(8).map((d)=>Card(child:ExpansionTile(
+      title:Text('${d['title']} · ${d['company']}'),subtitle:Text('Status: ${d['status']} · due ${d['dueAt']??'-'}'),
+      children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(d['message']??''))]
+    ))),
+    const SizedBox(height:18),Text('Recent LangGraph events',style:Theme.of(context).textTheme.titleMedium),
+    ...((dashboard['recentEvents'] as List?)??[]).take(20).map((e)=>Card(child:ListTile(
+      leading:const Icon(Icons.route_outlined),title:Text('${e['stage']} · ${e['type']}'),subtitle:Text(e['message']??'',maxLines:2,overflow:TextOverflow.ellipsis),
+      trailing:Text((e['createdAt']??'').toString().replaceFirst('T',' ').split('.').first)
+    ))),
+  ]);
+  Widget setupView()=>ListView(children:[Text('Your setup',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:14),const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),const Text('Paste a Greenhouse, Lever, Ashby or SmartRecruiters careers URL to add another official company board. Career Atlas can auto-submit compatible forms, while CAPTCHAs, assessments and uncertain sensitive/legal questions remain review-only.')]);
 }
