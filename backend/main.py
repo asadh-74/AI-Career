@@ -416,6 +416,10 @@ class EmployerMessageIn(BaseModel):
     classification: str = 'other'
     action_required: bool = False
 
+class QuestionMemoryIn(BaseModel):
+    answer_key: str = Field(default='', max_length=120)
+    selector_hint: str = Field(default='', max_length=400)
+
 @app.get('/api/v3/dashboard', dependencies=[Depends(auth)])
 def v3_dashboard(session:Session=Depends(db)):
     statuses=session.scalars(select(JobStatus)).all()
@@ -483,6 +487,20 @@ def v3_questions(session:Session=Depends(db)):
         'selectorHint':x.selector_hint,'sensitive':x.sensitive,'successCount':x.success_count,
         'lastSeenAt':x.last_seen_at.isoformat()
     } for x in rows]
+
+@app.post('/api/v3/questions/{question_id}', dependencies=[Depends(auth)])
+def v3_update_question(question_id:int,body:QuestionMemoryIn,session:Session=Depends(db)):
+    item=session.get(QuestionMemory,question_id)
+    if not item: raise HTTPException(404,'Question memory not found')
+    if item.sensitive and body.answer_key:
+        raise HTTPException(400,'Sensitive questions cannot use normal profile memory')
+    allowed={'','name','email','phone','location','linkedin','github','portfolio','availability','salary','work_authorized','requires_sponsorship'}
+    if body.answer_key not in allowed: raise HTTPException(400,'Unsupported profile key')
+    item.answer_key=body.answer_key
+    if body.selector_hint.strip(): item.selector_hint=body.selector_hint.strip()
+    item.last_seen_at=datetime.now(timezone.utc)
+    session.commit()
+    return {'id':item.id,'answerKey':item.answer_key,'sensitive':item.sensitive}
 
 @app.get('/api/v3/resume-variants', dependencies=[Depends(auth)])
 def v3_resume_variants(session:Session=Depends(db)):
