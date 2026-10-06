@@ -1,0 +1,53 @@
+name: Career Atlas v3 Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "flutter/lib/main.dart"
+      - ".github/workflows/v3-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: "sqlite:///./career-v3-smoke.db"
+      SESSION_SECRET: "smoke-session-secret"
+      AUTO_APPLY: "false"
+      ENABLE_EMAIL_MONITOR: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Compile backend
+        run: python -m compileall .
+      - name: Import v3 modules
+        run: |
+          python - <<'PY'
+          import main
+          import worker
+          import job_graph
+          import ats_adapters
+          import research_agents
+          import resume_tailor
+          import email_monitor
+          from v3_models import classify_failure, job_fingerprint, category_for_title
+
+          assert classify_failure("CAPTCHA detected") == "captcha"
+          assert category_for_title("Backend Python Engineer") == "backend"
+          assert len(job_fingerprint("Acme", "Engineer", "Remote")) == 64
+          assert ats_adapters.ats_name("https://jobs.ashbyhq.com/acme/123") == "ashby"
+          assert hasattr(job_graph, "APPLICATION_GRAPH")
+          assert hasattr(worker, "run")
+          print("Career Atlas v3 smoke checks passed")
+          PY
