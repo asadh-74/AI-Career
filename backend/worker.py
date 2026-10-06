@@ -19,6 +19,7 @@ from main import (
     ai_prepare, scan,
 )
 from public_sources import scan_public_sources
+from job_graph import run_application_graph
 
 TARGET_TITLE_TERMS = (
     # Core software roles
@@ -230,43 +231,21 @@ def run():
                 session.flush()
                 stats["scored"]+=1
 
-            if existing.score<cfg.min_match_score:
+            result=run_application_graph(
+                job=job,
+                doc=doc,
+                cfg=cfg,
+                score=existing.score,
+                draft=existing.draft,
+            )
+
+            state=result.get("status","failed")
+            if state=="below_threshold":
                 stats["belowThreshold"]+=1
                 session.commit()
                 continue
 
             stats["processed"]+=1
-            draft=naturalize_draft(job,existing.draft)
-            address=find_application_email(job.description)
-            result=None
-
-            if address and cfg.allow_email:
-                try:
-                    receipt=send_email_application(
-                        address,email_subject(job),draft,doc.filename,doc.pdf
-                    )
-                    result={"status":"applied","receipt":receipt}
-                except Exception as exc:
-                    result={
-                        "status":"failed",
-                        "reason":f"Email failed: {type(exc).__name__}: {str(exc)[:180]}"
-                    }
-
-            if result is None and cfg.allow_browser:
-                result=apply_with_playwright(
-                    job.apply_url,doc.pdf,doc.filename,draft
-                )
-                if result.get("status")=="failed":
-                    fallback=apply_with_selenium(
-                        job.apply_url,doc.pdf,doc.filename,draft
-                    )
-                    if fallback.get("status")!="failed":
-                        result=fallback
-
-            if result is None:
-                result={"status":"needs_human","reason":"No permitted application route"}
-
-            state=result.get("status","failed")
             if state=="applied":
                 existing.status="applied"
                 existing.receipt=result.get("receipt","browser-confirmed")
