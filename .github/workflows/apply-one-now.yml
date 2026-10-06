@@ -25,7 +25,7 @@ jobs:
       REMOTE_ONLY: "true"
       ALLOW_EMAIL_APPLICATIONS: "true"
       ALLOW_BROWSER_APPLICATIONS: "true"
-      ALLOW_INDEED: "false"
+      ALLOW_INDEED: "true"
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
       TARGET_JOB_URL: "https://afterrealism.com/careers/backend-developer"
