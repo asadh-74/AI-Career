@@ -171,30 +171,38 @@ def process_recruiter_mail(session,doc,stats):
         stats["emailMonitorError"]=f"{type(exc).__name__}: {str(exc)[:120]}";return
     if not messages:return
     pairs=session.execute(select(Application,Job).join(Job,Job.id==Application.job_id)).all()
+    matched_count=0
     for msg in messages:
-        duplicate=session.scalar(select(EmployerMessage).where(EmployerMessage.sender==msg["sender"],EmployerMessage.subject==msg["subject"]))
-        if duplicate:continue
         matched=match_application(msg,pairs)
-        app=matched[0] if matched else None
-        job=matched[1] if matched else None
-        row=EmployerMessage(application_id=app.id if app else None,sender=msg["sender"],subject=msg["subject"],body=msg["body"],
+        if not matched:
+            continue
+        app,job=matched
+        duplicate=session.scalar(select(EmployerMessage).where(
+            EmployerMessage.application_id==app.id,
+            EmployerMessage.sender==msg["sender"],
+            EmployerMessage.subject==msg["subject"]
+        ))
+        if duplicate:continue
+        row=EmployerMessage(application_id=app.id,sender=msg["sender"],subject=msg["subject"],body=msg["body"],
                             classification=msg["classification"],action_required=msg["action_required"],received_at=msg["received_at"])
-        session.add(row)
-        if app and job:
-            kind=msg["classification"]
-            stage="employer_viewed"
-            if kind=="interview":stage="interview"
-            elif kind=="rejection":stage="rejected"
-            elif kind=="offer":stage="offer"
-            record_event(session,job.id,stage,"employer_message",msg["subject"],application_id=app.id)
-            if kind=="interview" and not session.scalar(select(InterviewPrep).where(InterviewPrep.application_id==app.id)):
-                focus=sorted(set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",job.description or "")) & set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",doc.extracted_text or "")))[:20]
-                prep=(f"Interview preparation for {job.company} — {job.title}\n\n"
-                      f"Role focus from verified overlap: {', '.join(focus) if focus else 'review the job description and resume together'}.\n\n"
-                      "Prepare concise examples for: project architecture, debugging decisions, API/backend design, teamwork, deployment, and why this role. "
-                      "Review every requirement in the job description and identify which resume project demonstrates it.")
-                session.add(InterviewPrep(application_id=app.id,content=prep))
-    stats["recruiterMessages"]=len(messages)
+        session.add(row);matched_count+=1
+        kind=msg["classification"]
+        stage="employer_viewed"
+        if kind=="interview":stage="interview"
+        elif kind=="rejection":stage="rejected"
+        elif kind=="offer":stage="offer"
+        record_event(session,job.id,stage,"employer_message",msg["subject"],application_id=app.id)
+        if kind=="interview" and not session.scalar(select(InterviewPrep).where(InterviewPrep.application_id==app.id)):
+            focus=sorted(set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",job.description or "")) & set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",doc.extracted_text or "")))[:20]
+            prep=(f"Interview preparation for {job.company} — {job.title}\n\n"
+                  f"Role focus from verified overlap: {', '.join(focus) if focus else 'review the job description and resume together'}.\n\n"
+                  "Prepare concise examples for: project architecture, debugging decisions, API/backend design, teamwork, deployment, and why this role. "
+                  "Review every requirement in the job description and identify which resume project demonstrates it.")
+            session.add(InterviewPrep(application_id=app.id,content=prep))
+    # Remove any legacy unmatched records created by early v3 test runs.
+    for old in session.scalars(select(EmployerMessage).where(EmployerMessage.application_id==None)).all():
+        session.delete(old)
+    stats["recruiterMessages"]=matched_count
 
 def run():
     cfg=AutomationConfig.from_env()
