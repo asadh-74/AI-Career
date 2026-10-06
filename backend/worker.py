@@ -76,27 +76,36 @@ def learned_answers_for(session,url,profile):
 
 def remember_blocker(session,job,reason):
     host=(urlparse(job.apply_url or "").hostname or "").lower()
-    low=(reason or "").lower()
-    sensitive="sensitive/uncertain question:" in low
-    unknown="unknown required field:" in low
-    if not (sensitive or unknown):return
-    label=(reason.split(":",1)[1].strip() if ":" in reason else reason)[:260]
-    existing=session.scalar(select(QuestionMemory).where(QuestionMemory.host==host,QuestionMemory.label_key==label))
-    if not existing:
-        answer_key=""
-        l=label.lower()
-        for token,key in (
-            ("full name","name"),("first name","name"),("email","email"),("phone","phone"),
-            ("linkedin","linkedin"),("github","github"),("portfolio","portfolio"),("website","portfolio"),
-            ("availability","availability"),("salary","salary"),("location","location"),("city","location"),
-        ):
-            if token in l:answer_key=key;break
-        selector=""
-        m=re.search(r'data-testid="([^"]+)"',reason)
-        if m:selector=f'[data-testid="{m.group(1)}"]'
-        existing=QuestionMemory(host=host,label_key=label,answer_key=answer_key,selector_hint=selector,sensitive=sensitive)
-        session.add(existing)
-    existing.last_seen_at=datetime.now(timezone.utc)
+    for part in [x.strip() for x in (reason or "").split(" | ") if x.strip()]:
+        low=part.lower()
+        sensitive="sensitive/uncertain question:" in low
+        unknown="unknown required field:" in low
+        if not (sensitive or unknown):continue
+        label=(part.split(":",1)[1].strip() if ":" in part else part)[:260]
+        existing=session.scalar(select(QuestionMemory).where(QuestionMemory.host==host,QuestionMemory.label_key==label))
+        if not existing:
+            answer_key=""
+            l=label.lower()
+            for token,key in (
+                ("full name","name"),("first name","name"),("email","email"),("phone","phone"),
+                ("linkedin","linkedin"),("github","github"),("portfolio","portfolio"),("website","portfolio"),
+                ("availability","availability"),("salary","salary"),("location","location"),("city","location"),
+            ):
+                if token in l:answer_key=key;break
+            selector=""
+            m=re.search(r'data-testid="([^"]+)"',part)
+            if m:selector=f'[data-testid="{m.group(1)}"]'
+            existing=QuestionMemory(host=host,label_key=label,answer_key=answer_key,selector_hint=selector,sensitive=sensitive)
+            session.add(existing)
+        existing.last_seen_at=datetime.now(timezone.utc)
+
+def count_learned_successes(session,job,result):
+    used=((result.get("meta") or {}).get("learnedFields") or [])
+    if not used:return
+    host=(urlparse(job.apply_url or "").hostname or "").lower()
+    for label in used:
+        row=session.scalar(select(QuestionMemory).where(QuestionMemory.host==host,QuestionMemory.label_key==label))
+        if row:row.success_count+=1;row.last_seen_at=datetime.now(timezone.utc)
 
 def upsert_metric(session,job,doc,profile,base_score):
     values=dimensional_scores(job,doc,profile,base_score)
@@ -297,6 +306,7 @@ def run():
                     state=result.get("status","failed")
 
             store_artifacts(session,existing.id,result)
+            count_learned_successes(session,job,result)
             if state=="applied":
                 existing.status="applied";existing.receipt=result.get("receipt","browser-confirmed")
                 mark_status(session,job.id,"submitted",existing.receipt);stats["applied"]+=1
