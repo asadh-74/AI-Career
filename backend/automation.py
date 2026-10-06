@@ -211,6 +211,20 @@ def _fill_standard_fields(page,profile,draft,resume_path):
                 break
         except Exception:pass
 
+    # Standard application privacy/terms consent can be accepted as part of
+    # the user's explicit request to submit the application.
+    checks=page.locator('input[type="checkbox"]')
+    for i in range(min(checks.count(),20)):
+        try:
+            cb=checks.nth(i)
+            if cb.is_checked():continue
+            parent_text=(cb.locator("xpath=..").inner_text(timeout=1000) or "").lower()
+            grand_text=(cb.locator("xpath=../..").inner_text(timeout=1000) or "").lower()
+            text=(parent_text+" "+grand_text)[:1200]
+            if any(x in text for x in ("privacy policy","privacy","agree to","consent","terms")):
+                cb.check()
+        except Exception:pass
+
 def _sensitive_or_unknown_required(page):
     labels=page.locator("label")
     for i in range(min(labels.count(),120)):
@@ -236,7 +250,11 @@ def _sensitive_or_unknown_required(page):
                 field.get_attribute("aria-label"),
             ])).lower()
             if not any(tok in ident for tok in safe_tokens):
-                return f"Unknown required field: {ident[:180] or 'unlabelled required field'}"
+                try:
+                    html=(field.evaluate("(el)=>el.outerHTML") or "")[:240]
+                except Exception:
+                    html=""
+                return f"Unknown required field: {ident[:180] or 'unlabelled required field'} {html}"
         except Exception:pass
     return None
 
