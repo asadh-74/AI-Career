@@ -271,7 +271,19 @@ def run():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
             recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(400)).all()
+            # Build a cheap first-pass probability for every recent role so the
+            # daily strategy spends browser time on the strongest opportunities.
+            probability={}
+            for candidate in recent:
+                if not candidate or not title_relevant(candidate.title):
+                    continue
+                existing_app=session.scalar(select(Application).where(Application.job_id==candidate.id))
+                base=int(existing_app.score) if existing_app else 50
+                metric=upsert_metric(session,candidate,doc,profile,base)
+                probability[candidate.id]=metric.probability
+            recent.sort(key=lambda j:(probability.get(j.id,0),j.found_at),reverse=True)
             jobs=strategy_select(recent,160)
+            session.flush()
         max_to_score=max(50,min(120,cfg.daily_limit*10))
 
         pkt=ZoneInfo("Asia/Karachi");now_pkt=datetime.now(pkt)
