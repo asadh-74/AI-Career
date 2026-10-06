@@ -171,6 +171,28 @@ def process_recruiter_mail(session,doc,stats):
         stats["emailMonitorError"]=f"{type(exc).__name__}: {str(exc)[:120]}";return
     if not messages:return
     pairs=session.execute(select(Application,Job).join(Job,Job.id==Application.job_id)).all()
+
+    # Revalidate records imported by earlier matcher versions. Keep only
+    # messages that still have strong evidence for their linked application.
+    for old in session.scalars(select(EmployerMessage)).all():
+        if old.application_id is None:
+            session.delete(old)
+            continue
+        app_job=next(((a,j) for a,j in pairs if a.id==old.application_id),None)
+        if not app_job or not match_application(
+            {"sender":old.sender,"subject":old.subject,"body":old.body},
+            [app_job],
+        ):
+            session.delete(old)
+    session.flush()
+    for prep in session.scalars(select(InterviewPrep)).all():
+        has_interview=session.scalar(select(EmployerMessage).where(
+            EmployerMessage.application_id==prep.application_id,
+            EmployerMessage.classification=="interview"
+        ))
+        if not has_interview:
+            session.delete(prep)
+
     matched_count=0
     for msg in messages:
         matched=match_application(msg,pairs)
@@ -199,9 +221,6 @@ def process_recruiter_mail(session,doc,stats):
                   "Prepare concise examples for: project architecture, debugging decisions, API/backend design, teamwork, deployment, and why this role. "
                   "Review every requirement in the job description and identify which resume project demonstrates it.")
             session.add(InterviewPrep(application_id=app.id,content=prep))
-    # Remove any legacy unmatched records created by early v3 test runs.
-    for old in session.scalars(select(EmployerMessage).where(EmployerMessage.application_id==None)).all():
-        session.delete(old)
     stats["recruiterMessages"]=matched_count
 
 def run():
