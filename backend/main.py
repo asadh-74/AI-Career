@@ -431,8 +431,13 @@ def v3_dashboard(session:Session=Depends(db)):
     failed=sum(1 for a in apps if a.status=='failed')
     avg=round(sum(m.probability for m in metrics)/max(1,len(metrics))) if metrics else 0
     stages={}
+    latest={}
     for e in events:
-        stages[e.stage]=stages.get(e.stage,0)+1
+        key=e.application_id if e.application_id is not None else f"job:{e.job_id}"
+        if key not in latest:
+            latest[key]=e.stage
+    for stage in latest.values():
+        stages[stage]=stages.get(stage,0)+1
     return {
         'jobs':session.query(Job).count(),
         'applications':len(apps),
