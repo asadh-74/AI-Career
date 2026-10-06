@@ -291,11 +291,22 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
 
     labels=root.locator("label")
     for i in range(min(labels.count(),120)):
-        text=(labels.nth(i).inner_text() or "").strip()
+        label=labels.nth(i)
+        text=(label.inner_text() or "").strip()
         if text and needs_human(text):
             low=text.lower()
             explicit=sensitive_filled or []
             if ("gender" in low and "gender" in explicit) or (("race" in low or "ethnicity" in low) and "race_ethnicity" in explicit) or ("veteran" in low and "veteran_status" in explicit) or ("disability" in low and "disability_status" in explicit):
+                continue
+            # Optional demographic/sensitive questions are left blank instead
+            # of blocking the application or inventing an answer.
+            required=False
+            try:
+                parent=label.locator("xpath=..")
+                required=parent.locator("input[required],select[required],textarea[required],[aria-required='true']").count()>0
+            except Exception:
+                required=False
+            if not required and "*" not in text and "required" not in low:
                 continue
             blockers.append(f"Sensitive/uncertain question: {text[:180]}")
 
