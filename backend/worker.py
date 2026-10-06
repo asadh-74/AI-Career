@@ -108,6 +108,28 @@ def run():
 
     with SessionLocal() as session:
         target_job_id=(os.getenv("TARGET_JOB_ID") or "").strip()
+        target_job_url=(os.getenv("TARGET_JOB_URL") or "").strip()
+        target_job_title=(os.getenv("TARGET_JOB_TITLE") or "").strip()
+        target_job_company=(os.getenv("TARGET_JOB_COMPANY") or "").strip()
+        target_job_location=(os.getenv("TARGET_JOB_LOCATION") or "").strip()
+        target_job_provider=(os.getenv("TARGET_JOB_PROVIDER") or "Indeed").strip()
+        target_job_description=(os.getenv("TARGET_JOB_DESCRIPTION") or "").strip()
+
+        if target_job_url and not target_job_id.isdigit():
+            target=session.scalar(select(Job).where(Job.apply_url==target_job_url))
+            if not target:
+                target=Job(
+                    url=target_job_url,
+                    apply_url=target_job_url,
+                    company=target_job_company or "Unknown company",
+                    title=target_job_title or "Target role",
+                    location=target_job_location or "Remote",
+                    description=target_job_description,
+                    provider=target_job_provider or "Indeed",
+                )
+                session.add(target)
+                session.flush()
+            target_job_id=str(target.id)
 
         # Scheduled runs refresh all sources. Targeted one-job runs skip discovery
         # so the application attempt starts immediately.
