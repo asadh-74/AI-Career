@@ -38,12 +38,19 @@ def _store(session, rows):
             continue
         if session.scalar(select(Job.id).where(Job.url==url)):
             continue
+        # Exact normalized-source duplicate guard. A second fingerprint guard
+        # in the worker catches semantically identical cross-board copies.
+        company=_text(row.get("company") or "Unknown")[:160]
+        title=_text(row.get("title"))[:300]
+        location=_text(row.get("location") or "Remote")[:200]
+        if session.scalar(select(Job.id).where(Job.company==company,Job.title==title,Job.location==location)):
+            continue
         session.add(Job(
             url=url,
             apply_url=apply_url,
-            company=_text(row.get("company") or "Unknown")[:160],
-            title=_text(row.get("title"))[:300],
-            location=_text(row.get("location") or "Remote")[:200],
+            company=company,
+            title=title,
+            location=location,
             description=_text(row.get("description"))[:8000],
             provider=_text(row.get("provider"))[:30],
         ))
@@ -111,7 +118,13 @@ def himalayas(client):
     rows=[]
     items=(data.get("jobs") or data.get("data") or []) if isinstance(data,dict) else []
     for x in items:
-        company=x.get("companyName") or (x.get("company") or {}).get("name","") if isinstance(x.get("company"),dict) else x.get("company","")
+        company_obj=x.get("company")
+        if x.get("companyName"):
+            company=x.get("companyName")
+        elif isinstance(company_obj,dict):
+            company=company_obj.get("name","")
+        else:
+            company=company_obj or ""
         location=x.get("locationRestriction") or x.get("location") or "Remote"
         if isinstance(location,list): location=", ".join(str(v) for v in location)
         rows.append(dict(
