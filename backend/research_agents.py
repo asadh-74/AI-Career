@@ -70,5 +70,7 @@ def crew_research(job,profile:dict)->dict:
             "quality_score":max(0,min(100,score)),
             "source":"crewai",
         }
-    except Exception:
-        return heuristic_research(job,profile)
+    except Exception as exc:
+        out=heuristic_research(job,profile)
+        out["crew_error"]=f"{type(exc).__name__}: {str(exc)[:240]}"
+        return out
