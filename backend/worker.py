@@ -289,6 +289,19 @@ def run():
                 record_event(session,job.id,"matched","scored",f"Match score {score}",application_id=existing.id)
 
             metric=upsert_metric(session,job,doc,profile,existing.score)
+
+            # Run the more expensive CrewAI research only for roles that
+            # already clear the selected application threshold.
+            if existing.score>=cfg.min_match_score and os.getenv("CREWAI_LLM","").strip() and research.source!="crewai":
+                deep=crew_research(job,profile)
+                research.company_summary=deep["company_summary"]
+                research.eligibility_notes=deep["eligibility_notes"]
+                research.quality_score=int(deep["quality_score"])
+                research.source=deep["source"]
+                record_event(session,job.id,"matched","deep_research",
+                             f"CrewAI research: {research.quality_score}/100 ({research.source}).",
+                             application_id=existing.id)
+
             if duplicate_already_submitted(session,metric,job.id):
                 stats["duplicatesSkipped"]+=1
                 record_event(session,job.id,"discovered","duplicate_skip","Equivalent role already submitted.",application_id=existing.id)
