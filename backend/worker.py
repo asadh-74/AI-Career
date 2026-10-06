@@ -52,7 +52,7 @@ def remote_eligible(location:str)->bool:
 def title_relevant(title:str)->bool:
     t=(title or "").lower()
     excluded=("director","vice president","vp ","head of ","principal","staff engineer","engineering manager",
-              "sales manager","sales director","account manager","solutions architecture manager","senior manager")
+              "sales manager","sales director","account manager","solutions architecture manager","senior ","sr. ","sr ","lead ")
     return not any(x in t for x in excluded) and any(x in t for x in TARGET_TITLE_TERMS)
 
 def _profile_value(profile,key):
@@ -284,6 +284,13 @@ def run():
             if duplicate_already_submitted(session,metric,job.id):
                 stats["duplicatesSkipped"]+=1
                 record_event(session,job.id,"discovered","duplicate_skip","Equivalent role already submitted.",application_id=existing.id)
+                session.commit();continue
+
+            # Do not spend time generating tailored PDFs or opening browsers
+            # for roles that already fail the selected quality threshold.
+            if existing.score<cfg.min_match_score:
+                stats["belowThreshold"]+=1
+                record_event(session,job.id,"matched","below_threshold",f"Match score {existing.score} is below {cfg.min_match_score}.",application_id=existing.id)
                 session.commit();continue
 
             apply_doc=tailored_doc_for(session,job,doc)
