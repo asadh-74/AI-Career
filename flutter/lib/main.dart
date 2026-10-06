@@ -75,11 +75,11 @@ class _GateState extends State<Gate> {
 class Workspace extends StatefulWidget { const Workspace({super.key}); @override State<Workspace> createState()=>_WorkspaceState(); }
 class _WorkspaceState extends State<Workspace> {
   int tab=0; bool busy=false;
-  List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[];
+  List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
   Map<String,dynamic> dashboard={};
   String query='', statusFilter='all', qualityMode='balanced';
   @override void initState(){super.initState();reload();}
-  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
+  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
   Future<void> scan() async {setState(()=>busy=true);try{final result=await api.request('POST','scan');await reload();final errors=(result['errors'] as List).cast<String>();message('Added ${result['added']} jobs.${errors.isEmpty?'':' Board errors: ${errors.join(', ')}'}');}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
   Future<void> open(String url) async {final uri=Uri.tryParse(url);if(uri!=null && ['https','http'].contains(uri.scheme))await launchUrl(uri,mode:LaunchMode.externalApplication);}
@@ -126,6 +126,48 @@ class _WorkspaceState extends State<Workspace> {
       if(mounted)showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Submission evidence'),content:SizedBox(width:760,child:SingleChildScrollView(child:Column(children:widgets))),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close'))]));
     }catch(e){message('$e');}
   }
+  Future<void> mapQuestion(Map question) async {
+    final current=(question['answerKey']??'').toString();
+    String selected=current;
+    const options=['','name','email','phone','location','linkedin','github','portfolio','availability','salary','work_authorized','requires_sponsorship'];
+    await showDialog(context:context,builder:(c)=>StatefulBuilder(builder:(c,setLocal)=>AlertDialog(
+      title:const Text('Learn application field'),
+      content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text(question['label']??'',maxLines:4,overflow:TextOverflow.ellipsis),
+        const SizedBox(height:10),
+        if(question['sensitive']==true)const Text('Sensitive field: normal profile memory is intentionally disabled.'),
+        if(question['sensitive']!=true)DropdownButtonFormField<String>(
+          value:options.contains(selected)?selected:'',
+          decoration:const InputDecoration(labelText:'Reusable profile value'),
+          items:options.map((x)=>DropdownMenuItem(value:x,child:Text(x.isEmpty?'Do not auto-fill':x))).toList(),
+          onChanged:(x)=>setLocal(()=>selected=x??''),
+        ),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Cancel')),
+        FilledButton(onPressed:question['sensitive']==true?null:()async{
+          try{
+            await api.request('POST','v3/questions/${question['id']}',{'answer_key':selected,'selector_hint':question['selectorHint']??''});
+            if(c.mounted)Navigator.pop(c);
+            await reload();
+          }catch(e){message('$e');}
+        },child:const Text('Save mapping'))
+      ],
+    )));
+  }
+  Future<void> showInterviewPrep(int applicationId) async {
+    try{
+      final r=await api.request('GET','v3/interview-prep/$applicationId');
+      final content=(r['content']??'').toString();
+      if(content.isEmpty){message('No interview-prep package has been generated for this application yet.');return;}
+      if(mounted)showDialog(context:context,builder:(c)=>AlertDialog(
+        title:const Text('Interview preparation'),
+        content:SizedBox(width:720,child:SingleChildScrollView(child:SelectableText(content))),
+        actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close'))],
+      ));
+    }catch(e){message('$e');}
+  }
+
   Future<void> confirmApplication(Map application) async {
     final receipt=TextEditingController();
     await showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Record submitted application'),content:Column(mainAxisSize:MainAxisSize.min,children:[
@@ -301,13 +343,38 @@ class _WorkspaceState extends State<Workspace> {
       leading:Icon(m['actionRequired']==true?Icons.mark_email_unread_outlined:Icons.email_outlined),
       title:Text(m['subject']??''),
       subtitle:Text('${m['classification']} · ${m['sender']}',maxLines:2,overflow:TextOverflow.ellipsis),
-      trailing:m['actionRequired']==true?const Chip(label:Text('Action')):null
+      trailing:(m['classification']=='interview' && m['applicationId']!=null)
+        ? TextButton(onPressed:()=>showInterviewPrep(m['applicationId'] as int),child:const Text('Prep'))
+        : (m['actionRequired']==true?const Chip(label:Text('Action')):null)
     ))),
     const SizedBox(height:18),Text('Follow-up drafts',style:Theme.of(context).textTheme.titleMedium),
     if(followups.isEmpty)const Text('Follow-ups are prepared after 5 days with no recruiter response.'),
     ...followups.take(8).map((d)=>Card(child:ExpansionTile(
       title:Text('${d['title']} · ${d['company']}'),subtitle:Text('Status: ${d['status']} · due ${d['dueAt']??'-'}'),
       children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(d['message']??''))]
+    ))),
+    const SizedBox(height:18),Text('CrewAI / research results',style:Theme.of(context).textTheme.titleMedium),
+    if(research.isEmpty)const Text('Research results appear after roles enter the automation pipeline.'),
+    ...research.take(8).map((r)=>Card(child:ExpansionTile(
+      title:Text('${r['title']} · ${r['company']}'),
+      subtitle:Text('Quality ${r['qualityScore']} · ${r['source']}'),
+      children:[Padding(padding:const EdgeInsets.all(12),child:Text('${r['companySummary']}\n\n${r['eligibilityNotes']}'))]
+    ))),
+    const SizedBox(height:18),Text('Tailored resume variants',style:Theme.of(context).textTheme.titleMedium),
+    if(resumeVariants.isEmpty)const Text('Verified-content resume variants are created only for roles that clear the selected quality threshold.'),
+    ...resumeVariants.take(8).map((v)=>Card(child:ListTile(
+      leading:const Icon(Icons.picture_as_pdf_outlined),
+      title:Text('${v['title']} · ${v['company']}'),
+      subtitle:Text(v['strategy']??'',maxLines:2,overflow:TextOverflow.ellipsis),
+      trailing:Text(v['filename']??'')
+    ))),
+    const SizedBox(height:18),Text('Learned application fields',style:Theme.of(context).textTheme.titleMedium),
+    if(questions.isEmpty)const Text('New reusable non-sensitive fields will appear here after the browser encounters them.'),
+    ...questions.take(12).map((q)=>Card(child:ListTile(
+      leading:Icon(q['sensitive']==true?Icons.lock_outline:Icons.school_outlined),
+      title:Text(q['label']??'',maxLines:2,overflow:TextOverflow.ellipsis),
+      subtitle:Text('${q['host']} · ${q['sensitive']==true?'sensitive / isolated':((q['answerKey']??'').toString().isEmpty?'unmapped':'maps to ${q['answerKey']}')}'),
+      trailing:q['sensitive']==true?null:TextButton(onPressed:()=>mapQuestion(q as Map),child:const Text('Map'))
     ))),
     const SizedBox(height:18),Text('Recent LangGraph events',style:Theme.of(context).textTheme.titleMedium),
     ...((dashboard['recentEvents'] as List?)??[]).take(20).map((e)=>Card(child:ListTile(
