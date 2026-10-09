@@ -403,6 +403,27 @@ def _scopes(page):
         pass
     return scopes
 
+def _form_field_count(scope):
+    try:
+        return scope.locator('input:not([type="hidden"]), textarea, select').count()
+    except Exception:
+        return 0
+
+def _find_open_application(scope):
+    candidates=[
+        scope.get_by_role("button",name=re.compile(r"^apply$|^apply now$|start application|begin application|apply for this job",re.I)),
+        scope.get_by_role("link",name=re.compile(r"^apply$|^apply now$|start application|begin application|apply for this job",re.I)),
+    ]
+    for loc in candidates:
+        try:
+            for i in range(min(loc.count(),8)):
+                item=loc.nth(i)
+                if item.is_visible() and item.is_enabled():
+                    return item
+        except Exception:
+            pass
+    return None
+
 def _find_submit(page):
     candidates=[
         page.get_by_role("button",name=re.compile(r"submit|apply now|send application|send my application|finish|complete application",re.I)),
@@ -438,8 +459,18 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
             page=browser.new_page()
             try:
                 page.goto(url,wait_until="domcontentloaded",timeout=45000)
+                # JS-heavy ATS pages (especially Ashby/Workday) often render
+                # the application UI after DOMContentLoaded.
+                try:
+                    page.wait_for_timeout(2500)
+                except Exception:
+                    pass
 
                 _follow_external_apply(page)
+                try:
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    pass
 
                 for _ in range(5):
                     signal=_stop_signal(page)
@@ -472,7 +503,30 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         return {"status":"ready","reason":"Form filled; AUTO_SUBMIT_BROWSER is disabled"}
 
                     if submit is None:submit=_find_submit(active_scope)
+
+                    # Some ATS pages show an "Apply now" launcher before the
+                    # actual form. Do not mistake that for the final submit.
+                    opener=_find_open_application(active_scope)
+                    if opener is not None and _form_field_count(active_scope)<2:
+                        try:
+                            opener.click()
+                            page.wait_for_timeout(2500)
+                            continue
+                        except Exception:
+                            pass
+
                     if submit is not None:
+                        try:
+                            submit_text=(submit.inner_text(timeout=800) or submit.get_attribute("value") or "").strip().lower()
+                        except Exception:
+                            submit_text=""
+                        if re.fullmatch(r"apply|apply now|start application|begin application|apply for this job",submit_text,re.I) and _form_field_count(active_scope)<2:
+                            try:
+                                submit.click()
+                                page.wait_for_timeout(2500)
+                                continue
+                            except Exception:
+                                pass
                         before=page.url
                         try:pre_shot=page.screenshot(full_page=True)
                         except Exception:pre_shot=b""
@@ -507,6 +561,15 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                     if nxt is not None:
                         nxt.click();page.wait_for_timeout(2500)
                         continue
+
+                    # Last attempt: an ATS may render its form launcher only
+                    # after scripts settle, or use a generic Apply control.
+                    opener=_find_open_application(active_scope) or _find_open_application(page)
+                    if opener is not None:
+                        try:
+                            opener.click();page.wait_for_timeout(3000);continue
+                        except Exception:
+                            pass
                     return {"status":"needs_human","reason":"No actionable Next or Submit control found"}
 
                 return {"status":"needs_human","reason":"Application has more than five automated form steps"}
