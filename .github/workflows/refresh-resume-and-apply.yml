@@ -1,0 +1,58 @@
+name: Refresh Resume and Apply Now
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-resume-and-apply.yml"
+
+concurrency:
+  group: career-atlas-auto-apply
+  cancel-in-progress: false
+
+jobs:
+  refresh-and-apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: "gemini-flash-latest"
+      AUTO_APPLY: "true"
+      FORCE_RESCORE: "true"
+      MIN_MATCH_SCORE: "75"
+      MAX_APPLICATIONS_PER_DAY: "10"
+      REMOTE_ONLY: "true"
+      ALLOW_EMAIL_APPLICATIONS: "true"
+      ALLOW_BROWSER_APPLICATIONS: "true"
+      ALLOW_INDEED: "true"
+      ALLOW_GLASSDOOR: "false"
+      AUTO_SUBMIT_BROWSER: "true"
+      TAILOR_RESUME: "true"
+      ENABLE_EMAIL_MONITOR: "true"
+      IMAP_HOST: "imap.gmail.com"
+      APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - name: Refresh master resume in Career Atlas
+        run: python refresh_master_resume.py
+      - name: Rescore and apply
+        run: python worker.py
