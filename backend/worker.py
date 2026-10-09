@@ -32,6 +32,8 @@ TARGET_TITLE_TERMS=(
     "frontend engineer","frontend developer","front-end engineer","front-end developer","frontend","front-end","web developer",
     "full stack","full-stack","fullstack","ai engineer","machine learning","ml engineer","automation","agentic",
     "artificial intelligence","platform engineer","data engineer","embedded","iot","computer vision",
+    "ai integrator","ai integration","workflow automation","automation specialist","automations associate",
+    "product support engineer","technical support engineer","solutions engineer","integration engineer",
 )
 
 def mark_status(session,job_id,status,note):
@@ -41,12 +43,16 @@ def mark_status(session,job_id,status,note):
     row.status=status;row.note=(note or "")[:1000];row.updated_at=datetime.now(timezone.utc)
     return row
 
-def remote_eligible(location:str)->bool:
-    loc=(location or "").strip().lower()
-    if not loc:return False
-    if any(x in loc for x in ("remote","home based - worldwide","home-based - worldwide","worldwide","anywhere","global","pakistan")):
+def remote_eligible(job)->bool:
+    """Respect REMOTE_ONLY without treating every Pakistan role as remote."""
+    loc=(getattr(job,"location","") or "").strip().lower()
+    title=(getattr(job,"title","") or "").lower()
+    desc=(getattr(job,"description","") or "").lower()[:1800]
+    text=" ".join((loc,title,desc))
+    if not text.strip():return False
+    if any(x in text for x in ("remote","home based","home-based","work from home","work-from-home","distributed","virtual","worldwide","anywhere","global")):
         return True
-    if any(x in loc for x in ("apac","asia")) and any(x in loc for x in ("home based","home-based","distributed","virtual","remote")):
+    if any(x in loc for x in ("apac","asia")) and any(x in text for x in ("remote","home based","distributed","virtual")):
         return True
     return False
 
@@ -250,6 +256,25 @@ def process_recruiter_mail(session,doc,stats):
             session.add(InterviewPrep(application_id=app.id,content=prep))
     stats["recruiterMessages"]=matched_count
 
+def ensure_priority_sources(session):
+    """Maintain a small curated set of public direct employer boards."""
+    specs=(
+        ("Hamster Garage","Ashby","hamstergarage"),
+        ("Stellic","Ashby","stellic"),
+        ("CareerSwift","Ashby","careerswift.ai"),
+        ("CrewBloom","Ashby","crewbloom"),
+    )
+    added=0
+    for company,provider,slug in specs:
+        row=session.scalar(select(Source).where(Source.provider==provider,Source.slug==slug))
+        if not row:
+            session.add(Source(company=company,provider=provider,slug=slug,active=True))
+            added+=1
+        elif not row.active:
+            row.active=True
+    if added:session.commit()
+    return added
+
 def run():
     cfg=AutomationConfig.from_env()
     if not cfg.enabled:return {"status":"disabled","processed":0}
@@ -258,6 +283,7 @@ def run():
            "needsAttention":0,"failed":0,"alreadyApplied":0,"duplicatesSkipped":0,"retried":0}
 
     with SessionLocal() as session:
+        stats["prioritySourcesAdded"]=ensure_priority_sources(session)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
@@ -310,7 +336,14 @@ def run():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
             recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(400)).all()
-            # Build a cheap first-pass probability for every recent role so the
+            direct=session.scalars(
+                select(Job).where(Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")))
+                .order_by(Job.found_at.desc()).limit(350)
+            ).all()
+            by_id={j.id:j for j in recent}
+            for j in direct:by_id.setdefault(j.id,j)
+            recent=list(by_id.values())
+            # Build a cheap first-pass probability for every recent/direct role so the
             # daily strategy spends browser time on the strongest opportunities.
             probability={}
             for candidate in recent:
@@ -336,7 +369,7 @@ def run():
             if not job:continue
             stats["jobsConsidered"]+=1
             if stats["applied"]>=remaining_today or stats["processed"]>=max_attempts or stats["scored"]>=max_to_score:break
-            if cfg.remote_only and not remote_eligible(job.location):continue
+            if cfg.remote_only and not remote_eligible(job):continue
             stats["remoteEligible"]+=1
             if not title_relevant(job.title):continue
             stats["titleRelevant"]+=1
