@@ -1,4 +1,4 @@
-# retry-token: tensorops-validation-diagnostic-v3
+# retry-token: whippy-network-validation-v4
 name: Apply One Job Now
 
 on:
@@ -30,12 +30,12 @@ jobs:
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
       TAILOR_RESUME: "true"
-      TARGET_JOB_URL: "https://job-boards.eu.greenhouse.io/tensorops/jobs/4987862101"
-      TARGET_JOB_TITLE: "Junior Data Scientist (Remote - Pakistan)"
-      TARGET_JOB_COMPANY: "TensorOps"
-      TARGET_JOB_LOCATION: "Pakistan; Remote"
-      TARGET_JOB_PROVIDER: "Greenhouse"
-      TARGET_JOB_DESCRIPTION: "Entry-level fully remote Pakistan data science role for recent graduates or candidates with 0-2 years. Requires Python for data analysis, Pandas, SQL, analytical problem solving, communication and interest in machine learning, LLMs and Generative AI. Work includes model-performance analysis, AI/ML research, reports, dashboards and project discovery. Exposure includes LangChain, AWS, GCP, AI copilots, autonomous agents, vector databases and text-to-SQL. Engineering is an accepted quantitative degree."
+      TARGET_JOB_URL: "https://jobs.ashbyhq.com/whippy/cb194715-61e9-4c5f-b8ac-ca1ca962cc4a/application"
+      TARGET_JOB_TITLE: "Software Engineer: Backend"
+      TARGET_JOB_COMPANY: "Whippy"
+      TARGET_JOB_LOCATION: "Remote - Worldwide"
+      TARGET_JOB_PROVIDER: "Ashby"
+      TARGET_JOB_DESCRIPTION: "Remote worldwide backend software engineering role at an AI-powered communications company. Build scalable well-documented web APIs and backend services, tests, product analytics and Postgres-backed systems. Work across planning, implementation, rollout and monitoring in a distributed asynchronous team; product uses AI agents for communication automation."
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
