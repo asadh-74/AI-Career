@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-10-safe-tailored-batch
+# direct-source-batch: 2026-10-10-form-only-whippy-enveritas
 name: Career Atlas Automation
 
 on:
@@ -34,7 +34,7 @@ jobs:
       MIN_MATCH_SCORE: "75"
       MAX_APPLICATIONS_PER_DAY: "15"
       REMOTE_ONLY: "true"
-      ALLOW_EMAIL_APPLICATIONS: "true"
+      ALLOW_EMAIL_APPLICATIONS: "false"
       ALLOW_BROWSER_APPLICATIONS: "true"
       ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
       ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
