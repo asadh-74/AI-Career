@@ -59,3 +59,51 @@ TRAINING & CERTIFICATIONS
 AtomCamp AI Bootcamp: Deep Learning, NLP/LLMs, Generative AI, RAG, LangChain/LangGraph, n8n, MLOps/Deployment
 IBM Data Analysis with Python | Microsoft/edX AI Apps & Agents on Azure
 """
+
+
+def build_canonical_resume_pdf():
+    """Generate a compact ATS-friendly PDF from the canonical verified text."""
+    import io
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
+
+    buf=io.BytesIO()
+    doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=12*mm,leftMargin=12*mm,topMargin=9*mm,bottomMargin=9*mm)
+    styles=getSampleStyleSheet()
+    body=ParagraphStyle("Body",parent=styles["BodyText"],fontName="Helvetica",fontSize=8.3,leading=9.7,spaceAfter=1)
+    small=ParagraphStyle("Small",parent=body,fontSize=8.0,leading=9.2)
+    title=ParagraphStyle("Title",parent=styles["Title"],fontName="Helvetica-Bold",fontSize=16.5,leading=17,alignment=TA_CENTER,spaceAfter=1)
+    subtitle=ParagraphStyle("Subtitle",parent=body,fontName="Helvetica-Bold",fontSize=10,leading=11,alignment=TA_CENTER,spaceAfter=1)
+    section=ParagraphStyle("Section",parent=body,fontName="Helvetica-Bold",fontSize=9.3,leading=10,spaceBefore=3,spaceAfter=1)
+
+    lines=[x.rstrip() for x in CANONICAL_RESUME_TEXT.splitlines()]
+    story=[]
+    section_names={"PROFESSIONAL SUMMARY","TECHNICAL SKILLS","PROFESSIONAL EXPERIENCE","SELECTED PROJECTS","EDUCATION","TRAINING & CERTIFICATIONS"}
+    for idx,line in enumerate(lines):
+        if not line:
+            continue
+        safe=line.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        if idx==0:
+            story.append(Paragraph(safe,title))
+        elif idx==1:
+            story.append(Paragraph(safe,subtitle))
+        elif idx in (2,3,4):
+            center=ParagraphStyle(f"Center{idx}",parent=small,alignment=TA_CENTER)
+            story.append(Paragraph(safe,center))
+        elif line in section_names:
+            story.append(Paragraph(safe,section))
+            story.append(HRFlowable(width="100%",thickness=.45,spaceBefore=0,spaceAfter=2))
+        elif line.startswith("- "):
+            story.append(Paragraph("• "+safe[2:],ParagraphStyle("Bullet",parent=small,leftIndent=9,firstLineIndent=-6,spaceAfter=.4)))
+        elif "|" in line and any(x in line for x in ("Intern","Engineering Intern","B.E. Electrical Engineering")):
+            story.append(Paragraph(f"<b>{safe}</b>",body))
+        elif ":" in line and line.split(":",1)[0] in {"Programming","Backend & APIs","Agentic AI & LLMs","Automation & DevOps","Data & ML","Frontend & Mobile"}:
+            k,v=line.split(":",1)
+            story.append(Paragraph(f"<b>{k}:</b>{v}",small))
+        else:
+            story.append(Paragraph(safe,body))
+    doc.build(story)
+    return buf.getvalue()
