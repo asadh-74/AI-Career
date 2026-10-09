@@ -273,6 +273,8 @@ def ensure_priority_sources(session):
         ("Stellic","Ashby","stellic"),
         ("CareerSwift","Ashby","careerswift.ai"),
         ("CrewBloom","Ashby","crewbloom"),
+        ("TensorOps","Greenhouse","tensorops"),
+        ("Motive","Greenhouse","gomotive"),
     )
     added=0
     for company,provider,slug in specs:
