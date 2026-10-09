@@ -18,7 +18,7 @@ from job_graph import run_application_graph
 from research_agents import crew_research
 from resume_tailor import build_tailored_resume
 from email_monitor import fetch_recent_messages, match_application
-from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION
+from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION, build_canonical_resume_pdf
 from v3_models import (
     ApplicationArtifact, ApplicationEvent, EmployerMessage, FollowUpDraft,
     InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant,
@@ -55,6 +55,21 @@ def title_relevant(title:str)->bool:
     excluded=("director","vice president","vp ","head of ","principal","staff engineer","engineering manager",
               "sales manager","sales director","account manager","solutions architecture manager","senior ","sr. ","sr ","lead ")
     return not any(x in t for x in excluded) and any(x in t for x in TARGET_TITLE_TERMS)
+AGGREGATOR_PROVIDERS={"wwr","arbeitnow","remotive","jobicy","remoteok","himalayas"}
+
+def direct_apply_priority(job)->int:
+    """Prefer official company/ATS application URLs over aggregator listings."""
+    host=(urlparse(job.apply_url or "").hostname or "").lower()
+    provider=(job.provider or "").lower()
+    if any(x in host for x in ("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com")):
+        return 4
+    if provider in {"greenhouse","lever","levereu","ashby","smartrecruiters","indeed"} and provider not in AGGREGATOR_PROVIDERS:
+        return 3
+    if provider not in AGGREGATOR_PROVIDERS:
+        return 2
+    # Aggregator jobs remain discoverable but rank after direct employer forms.
+    return 0
+
 
 def _profile_value(profile,key):
     aliases={
@@ -274,12 +289,18 @@ def run():
 
         stored_doc=session.scalar(select(Document).where(Document.kind=="Resume")) or session.scalar(select(Document).where(Document.kind=="CV"))
         if not stored_doc:return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
-        # Use the corrected canonical software/AI profile for matching and PDF
-        # tailoring while preserving the stored document id for compatibility.
+        # Keep the live Career Atlas master resume synchronized with the
+        # corrected verified software/AI profile.
+        canonical_filename="Asad_Hussain_Software_AI_Resume_2026.pdf"
+        if stored_doc.filename!=canonical_filename or stored_doc.extracted_text!=CANONICAL_RESUME_TEXT:
+            stored_doc.filename=canonical_filename
+            stored_doc.extracted_text=CANONICAL_RESUME_TEXT
+            stored_doc.pdf=build_canonical_resume_pdf()
+            session.commit()
         doc=SimpleNamespace(
             id=stored_doc.id,
             kind=getattr(stored_doc,"kind","Resume"),
-            filename="Asad_Hussain_Software_AI_Resume_2026.pdf",
+            filename=canonical_filename,
             pdf=stored_doc.pdf,
             extracted_text=CANONICAL_RESUME_TEXT,
         )
@@ -299,7 +320,7 @@ def run():
                 base=int(existing_app.score) if existing_app else 50
                 metric=upsert_metric(session,candidate,doc,profile,base)
                 probability[candidate.id]=metric.probability
-            recent.sort(key=lambda j:(probability.get(j.id,0),j.found_at),reverse=True)
+            recent.sort(key=lambda j:(direct_apply_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
             jobs=strategy_select(recent,160)
             session.flush()
         max_to_score=max(50,min(120,cfg.daily_limit*10))
