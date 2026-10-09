@@ -59,10 +59,20 @@ def load_sensitive_profile():
 
 
 def find_application_email(text):
+    """Return only an email that clearly looks like a recruiting inbox.
+
+    Job descriptions often contain accessibility, privacy, legal or support
+    addresses. Those must never receive an application automatically.
+    """
     candidates=re.findall(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",text or "")
+    positive=("jobs","job","careers","career","recruit","recruiting","recruitment","talent","hiring","hr","people","apply","applications")
+    negative=("accommodation","accessibility","reasonable","privacy","legal","support","help","security","press","media","billing","compliance","noreply","no-reply")
     for address in candidates:
         low=address.lower()
-        if not any(x in low for x in ("example.com","example.org","noreply","no-reply")):return address
+        local=low.split("@",1)[0]
+        if any(x in low for x in ("example.com","example.org")):continue
+        if any(x in local for x in negative):continue
+        if any(x in local for x in positive):return address
     return None
 
 def needs_human(question):
