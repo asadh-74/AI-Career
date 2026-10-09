@@ -523,7 +523,20 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         or any(x in path.lower() for x in ("application","apply","submit","candidate"))
                     )
                     if atsish:
-                        network_posts.append({"status":int(response.status),"host":host,"path":path[:240]})
+                        op=""
+                        try:
+                            body=request.post_data or ""
+                            if body and len(body)<200000:
+                                parsed_body=json.loads(body)
+                                if isinstance(parsed_body,dict):
+                                    op=str(parsed_body.get("operationName") or "").strip()
+                                    if not op:
+                                        query=str(parsed_body.get("query") or "")
+                                        m=re.search(r"\b(?:mutation|query)\s+([A-Za-z0-9_]+)",query)
+                                        if m:op=m.group(1)
+                        except Exception:
+                            op=""
+                        network_posts.append({"status":int(response.status),"host":host,"path":path[:240],"op":op[:100]})
                 except Exception:
                     pass
             page.on("response",_capture_submit_response)
@@ -628,7 +641,10 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                             host=hit.get("host","");path=hit.get("path","");status=int(hit.get("status",0))
                             ok=200 <= status < 300
                             if not ok:continue
+                            op=(hit.get("op") or "").lower()
                             if host=="api.ashbyhq.com" and "applicationform.submit" in path.lower():
+                                network_confirmed=hit;break
+                            if host=="jobs.ashbyhq.com" and path=="/api/non-user-graphql" and "submit" in op and "application" in op:
                                 network_confirmed=hit;break
                             if "greenhouse.io" in host and re.search(r"/jobs/[^/]+(?:/applications?)?$|/applications?/",path,re.I):
                                 network_confirmed=hit;break
@@ -644,7 +660,7 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                             return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
                         diag=""
                         if network_posts:
-                            brief=", ".join(f"{x['status']} {x['host']}{x['path']}" for x in network_posts[-5:])
+                            brief=", ".join(f"{x['status']} {x['host']}{x['path']}"+(f" op={x.get('op')}" if x.get("op") else "") for x in network_posts[-8:])
                             diag+=f" ATS POST responses: {brief}"
                         invalid=[]
                         for scope in _scopes(page):
