@@ -8,7 +8,7 @@ import json, os, re, smtplib, tempfile
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from ats_adapters import ats_name, fill_ats_fields, application_root
 
 SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity",
@@ -341,6 +341,58 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
         return " | ".join(unique[:12])
     return None
 
+AGGREGATOR_HOSTS=("weworkremotely.com","remoteok.com","jobicy.com","himalayas.app","arbeitnow.com","arbeitnow.ch","remotive.com")
+ATS_HOST_HINTS=("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com")
+
+def _follow_external_apply(page):
+    """Resolve an aggregator listing to the employer/ATS application page."""
+    try:
+        current=(urlparse(page.url).hostname or "").lower()
+        if not any(x in current for x in AGGREGATOR_HOSTS):
+            return False
+        candidates=[]
+        links=page.locator("a[href]")
+        for i in range(min(links.count(),120)):
+            try:
+                link=links.nth(i)
+                href=(link.get_attribute("href") or "").strip()
+                if not href or href.startswith(("#","javascript:","mailto:")):
+                    continue
+                absolute=urljoin(page.url,href)
+                parsed=urlparse(absolute)
+                host=(parsed.hostname or "").lower()
+                if parsed.scheme not in ("http","https") or not host:
+                    continue
+                text=(link.inner_text(timeout=500) or "").strip().lower()
+                score=0
+                if re.search(r"apply|application|company website|view (job|role)|original (job|posting)",text,re.I):score+=70
+                if any(x in host for x in ATS_HOST_HINTS):score+=60
+                if host!=current:score+=25
+                if re.search(r"/(jobs?|careers?|apply|positions?|openings?)(/|$)",parsed.path,re.I):score+=20
+                if any(x in host for x in AGGREGATOR_HOSTS):score-=45
+                if any(x in host for x in ("linkedin.com","facebook.com","twitter.com","x.com","instagram.com")):score-=80
+                candidates.append((score,absolute))
+            except Exception:
+                pass
+        if not candidates:return False
+        candidates.sort(key=lambda x:x[0],reverse=True)
+        score,target=candidates[0]
+        if score<45:return False
+        page.goto(target,wait_until="domcontentloaded",timeout=45000)
+        return True
+    except Exception:
+        return False
+
+def _scopes(page):
+    scopes=[page]
+    try:
+        for frame in page.frames:
+            if frame != page.main_frame:
+                scopes.append(frame)
+    except Exception:
+        pass
+    return scopes
+
 def _find_submit(page):
     candidates=[
         page.get_by_role("button",name=re.compile(r"submit|apply now|send application|send my application|finish|complete application",re.I)),
@@ -377,32 +429,39 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
             try:
                 page.goto(url,wait_until="domcontentloaded",timeout=45000)
 
-                host=(urlparse(page.url).hostname or "").lower()
-                if any(x in host for x in ("weworkremotely.com","remoteok.com","jobicy.com","himalayas.app","arbeitnow.com","remotive.com")):
-                    try:
-                        apply_link=page.get_by_role("link",name=re.compile(r"apply",re.I))
-                        for i in range(min(apply_link.count(),10)):
-                            href=apply_link.nth(i).get_attribute("href")
-                            if href and not href.startswith("#"):
-                                page.goto(href,wait_until="domcontentloaded",timeout=45000)
-                                break
-                    except Exception:pass
+                _follow_external_apply(page)
 
                 for _ in range(5):
                     signal=_stop_signal(page)
                     if signal:return {"status":"needs_human","reason":signal}
 
-                    _fill_standard_fields(page,profile,draft,resume_path)
-                    ats_info=fill_ats_fields(page,page.url,profile,draft,resume_path)
-                    learned_filled=_fill_learned_answers(page,learned_answers)
-                    sensitive_filled=_fill_explicit_sensitive_answers(page)
-                    blocker=_sensitive_or_unknown_required(page,sensitive_filled)
+                    active_scope=page
+                    ats_info={"ats":"generic","touched":[]}
+                    learned_filled=[]
+                    blocker=None
+                    submit=None
+                    nxt=None
+                    for scope in _scopes(page):
+                        try:
+                            _fill_standard_fields(scope,profile,draft,resume_path)
+                            ats_info=fill_ats_fields(scope,page.url,profile,draft,resume_path)
+                            learned_filled.extend(_fill_learned_answers(scope,learned_answers))
+                            sensitive_filled=_fill_explicit_sensitive_answers(scope)
+                            possible=_sensitive_or_unknown_required(scope,sensitive_filled)
+                            if possible and blocker is None:blocker=possible
+                            found_submit=_find_submit(scope)
+                            found_next=_find_next(scope)
+                            if found_submit is not None or found_next is not None:
+                                active_scope=scope;submit=found_submit;nxt=found_next;blocker=possible
+                                break
+                        except Exception:
+                            pass
                     if blocker:return {"status":"needs_human","reason":blocker}
 
                     if not AutomationConfig.from_env().auto_submit_browser:
                         return {"status":"ready","reason":"Form filled; AUTO_SUBMIT_BROWSER is disabled"}
 
-                    submit=_find_submit(page)
+                    if submit is None:submit=_find_submit(active_scope)
                     if submit is not None:
                         before=page.url
                         try:pre_shot=page.screenshot(full_page=True)
@@ -411,7 +470,16 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         page.wait_for_timeout(4500)
                         try:post_shot=page.screenshot(full_page=True)
                         except Exception:post_shot=b""
-                        final=(page.locator("body").inner_text(timeout=7000) or "").lower()
+                        texts=[]
+                        for scope in _scopes(page):
+                            try:texts.append(scope.locator("body").inner_text(timeout=4000) or "")
+                            except Exception:pass
+                            try:
+                                alerts=scope.locator('[role="alert"], [aria-live="polite"], [aria-live="assertive"], .toast, .notification, .success')
+                                for ai in range(min(alerts.count(),10)):
+                                    texts.append(alerts.nth(ai).inner_text(timeout=500) or "")
+                            except Exception:pass
+                        final="\n".join(texts).lower()
                         confirmations=(
                             "application submitted","thank you for applying","application received",
                             "thanks for applying","successfully submitted","we have received your application",
@@ -425,7 +493,7 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                             return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
                         return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected","pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
-                    nxt=_find_next(page)
+                    if nxt is None:nxt=_find_next(active_scope)
                     if nxt is not None:
                         nxt.click();page.wait_for_timeout(2500)
                         continue
