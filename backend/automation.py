@@ -470,6 +470,26 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
         with sync_playwright() as p:
             browser=p.chromium.launch(headless=True)
             page=browser.new_page()
+            network_posts=[]
+            def _capture_submit_response(response):
+                try:
+                    request=response.request
+                    if (request.method or "").upper()!="POST":
+                        return
+                    parsed=urlparse(response.url)
+                    host=(parsed.hostname or "").lower()
+                    path=parsed.path or "/"
+                    # Store only host/path/status. Never store query strings,
+                    # request bodies or applicant data.
+                    atsish=(
+                        any(x in host for x in ("greenhouse.io","ashbyhq.com","lever.co","smartrecruiters.com","workday"))
+                        or any(x in path.lower() for x in ("application","apply","submit","candidate"))
+                    )
+                    if atsish:
+                        network_posts.append({"status":int(response.status),"host":host,"path":path[:240]})
+                except Exception:
+                    pass
+            page.on("response",_capture_submit_response)
             try:
                 page.goto(url,wait_until="domcontentloaded",timeout=45000)
                 # JS-heavy ATS pages (especially Ashby/Workday) often render
@@ -562,13 +582,34 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                             "thanks for applying","successfully submitted","we have received your application",
                             "your application has been submitted","thank you for your application",
                         )
-                        meta={"ats":ats_info.get("ats","generic"),"learnedFields":learned_filled}
+                        meta={"ats":ats_info.get("ats","generic"),"learnedFields":learned_filled,"networkPosts":network_posts[-8:]}
+                        # A successful response from a documented ATS application
+                        # submission endpoint is strong confirmation even when the
+                        # employer customizes or omits the thank-you text.
+                        network_confirmed=None
+                        for hit in network_posts:
+                            host=hit.get("host","");path=hit.get("path","");status=int(hit.get("status",0))
+                            ok=200 <= status < 300
+                            if not ok:continue
+                            if host=="api.ashbyhq.com" and "applicationform.submit" in path.lower():
+                                network_confirmed=hit;break
+                            if "greenhouse.io" in host and re.search(r"/jobs/[^/]+(?:/applications?)?$|/applications?/",path,re.I):
+                                network_confirmed=hit;break
+                            if "lever.co" in host and re.search(r"/postings/|/apply",path,re.I):
+                                network_confirmed=hit;break
+                        if network_confirmed:
+                            receipt=f"ats-network-confirmed:{network_confirmed['host']}{network_confirmed['path']}"
+                            return {"status":"applied","receipt":receipt,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
                         if any(x in final for x in confirmations):
                             return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
                         # Some ATS pages navigate to a confirmation URL with little text.
                         if page.url!=before and any(x in page.url.lower() for x in ("thank","success","confirmation","submitted")):
                             return {"status":"applied","receipt":page.url,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
-                        return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected","pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
+                        diag=""
+                        if network_posts:
+                            brief=", ".join(f"{x['status']} {x['host']}{x['path']}" for x in network_posts[-5:])
+                            diag=f" ATS POST responses: {brief}"
+                        return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected."+diag,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
                     if nxt is None:nxt=_find_next(active_scope)
                     if nxt is not None:
