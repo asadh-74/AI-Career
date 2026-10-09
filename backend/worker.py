@@ -18,6 +18,7 @@ from job_graph import run_application_graph
 from research_agents import crew_research
 from resume_tailor import build_tailored_resume
 from email_monitor import fetch_recent_messages, match_application
+from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION
 from v3_models import (
     ApplicationArtifact, ApplicationEvent, EmployerMessage, FollowUpDraft,
     InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant,
@@ -133,14 +134,14 @@ def tailored_doc_for(session,job,doc):
     tailored=build_tailored_resume(job,doc)
     if not row:
         row=ResumeVariant(job_id=job.id,source_document_id=doc.id,filename=tailored.filename,pdf=tailored.pdf,
-                          extracted_text=tailored.extracted_text,strategy=tailored.strategy)
+                          extracted_text=tailored.extracted_text,strategy=f"{RESUME_PROFILE_VERSION} | {tailored.strategy}")
         session.add(row)
     else:
         row.source_document_id=doc.id
         row.filename=tailored.filename
         row.pdf=tailored.pdf
         row.extracted_text=tailored.extracted_text
-        row.strategy=tailored.strategy
+        row.strategy=f"{RESUME_PROFILE_VERSION} | {tailored.strategy}"
     session.flush()
     return SimpleNamespace(id=doc.id,filename=row.filename,pdf=row.pdf,extracted_text=row.extracted_text)
 
@@ -271,8 +272,18 @@ def run():
             except Exception as exc:
                 stats["scanErrors"]=[f"scan failed: {type(exc).__name__}: {str(exc)[:180]}"]
 
-        doc=session.scalar(select(Document).where(Document.kind=="Resume")) or session.scalar(select(Document).where(Document.kind=="CV"))
-        if not doc:return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
+        stored_doc=session.scalar(select(Document).where(Document.kind=="Resume")) or session.scalar(select(Document).where(Document.kind=="CV"))
+        if not stored_doc:return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
+        # Use the corrected canonical software/AI profile for matching and PDF
+        # tailoring while preserving the stored document id for compatibility.
+        doc=SimpleNamespace(
+            id=stored_doc.id,
+            kind=getattr(stored_doc,"kind","Resume"),
+            filename="Asad_Hussain_Software_AI_Resume_2026.pdf",
+            pdf=stored_doc.pdf,
+            extracted_text=CANONICAL_RESUME_TEXT,
+        )
+        stats["resumeProfileVersion"]=RESUME_PROFILE_VERSION
 
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
