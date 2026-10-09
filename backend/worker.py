@@ -411,6 +411,13 @@ def run():
         for job in jobs:
             if not job:continue
             stats["jobsConsidered"]+=1
+            # Canonical's current Greenhouse forms require protected
+            # demographic answers. Keep them discoverable in the dashboard,
+            # but do not spend automatic-application attempts on them.
+            if (job.company or "").strip().lower()=="canonical":
+                record_event(session,job.id,"discovered","protected_fields_skip","Automatic submission skipped because the employer form requires protected demographic answers.")
+                session.commit()
+                continue
             if stats["applied"]>=remaining_today or stats["processed"]>=max_attempts or stats["scored"]>=max_to_score:break
             if cfg.remote_only and not remote_eligible(job):continue
             stats["remoteEligible"]+=1
