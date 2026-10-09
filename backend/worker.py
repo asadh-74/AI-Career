@@ -34,6 +34,7 @@ TARGET_TITLE_TERMS=(
     "artificial intelligence","platform engineer","data engineer","embedded","iot","computer vision",
     "ai integrator","ai integration","workflow automation","automation specialist","automations associate",
     "product support engineer","technical support engineer","solutions engineer","integration engineer",
+    "data scientist","mlops engineer","ai evaluation engineer",
 )
 
 def mark_status(session,job_id,status,note):
