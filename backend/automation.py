@@ -437,6 +437,43 @@ def _find_open_application(scope):
             pass
     return None
 
+def _validation_diagnostics(scope,profile=None):
+    """Return labels for browser-invalid fields without exposing answers."""
+    out=[]
+    profile=profile or {}
+    redact=[str(profile.get(k,"")).strip() for k in ("name","email","phone") if str(profile.get(k,"")).strip()]
+    try:
+        invalid=scope.locator(':invalid, [aria-invalid="true"]')
+        for i in range(min(invalid.count(),24)):
+            field=invalid.nth(i)
+            try:
+                fid=(field.get_attribute("id") or "").strip()
+                name=(field.get_attribute("name") or "").strip()
+                aria=(field.get_attribute("aria-label") or "").strip()
+                placeholder=(field.get_attribute("placeholder") or "").strip()
+                label_text=""
+                if fid:
+                    lab=scope.locator(f'label[for="{fid}"]')
+                    if lab.count():
+                        label_text=(lab.first.inner_text(timeout=500) or "").strip()
+                if not label_text:
+                    try:
+                        wrapper=field.locator("xpath=ancestor::*[self::fieldset or self::div][1]")
+                        label_text=(wrapper.inner_text(timeout=500) or "").strip()
+                    except Exception:
+                        pass
+                text=" ".join(x for x in (label_text,aria,placeholder,name,fid) if x)
+                text=re.sub(r"\s+"," ",text).strip()
+                for secret in redact:
+                    text=text.replace(secret,"[redacted]")
+                if text and text not in out:
+                    out.append(text[:220])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return out[:10]
+
 def _find_submit(page):
     candidates=[
         page.get_by_role("button",name=re.compile(r"submit|apply now|send application|send my application|finish|complete application",re.I)),
@@ -608,7 +645,13 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         diag=""
                         if network_posts:
                             brief=", ".join(f"{x['status']} {x['host']}{x['path']}" for x in network_posts[-5:])
-                            diag=f" ATS POST responses: {brief}"
+                            diag+=f" ATS POST responses: {brief}"
+                        invalid=[]
+                        for scope in _scopes(page):
+                            invalid.extend(_validation_diagnostics(scope,profile))
+                        invalid=list(dict.fromkeys(invalid))[:10]
+                        if invalid:
+                            diag+=" Invalid fields: "+" | ".join(invalid)
                         return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected."+diag,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
                     if nxt is None:nxt=_find_next(active_scope)
