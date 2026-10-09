@@ -328,7 +328,20 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
         field=required.nth(i)
         try:
             typ=(field.get_attribute("type") or "").lower()
+            aria_hidden=(field.get_attribute("aria-hidden") or "").lower()
+            tabindex=(field.get_attribute("tabindex") or "").strip()
+            classes=(field.get_attribute("class") or "").lower()
             if typ in ("hidden","submit","button","file","checkbox","radio"):continue
+            # Greenhouse/Remix and other ATS products use invisible required
+            # proxy inputs to drive custom dropdown validation. They are not
+            # applicant questions and must not block an otherwise completed form.
+            if aria_hidden=="true" or tabindex=="-1" or "requiredinput" in classes:
+                continue
+            try:
+                if not field.is_visible():
+                    continue
+            except Exception:
+                pass
             value=(field.input_value() or "").strip()
             if value:continue
             ident=" ".join(filter(None,[
