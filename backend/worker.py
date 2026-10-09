@@ -130,11 +130,18 @@ def tailored_doc_for(session,job,doc):
     enabled=os.getenv("TAILOR_RESUME","true").lower() in {"1","true","yes","on"}
     if not enabled:return doc
     row=session.scalar(select(ResumeVariant).where(ResumeVariant.job_id==job.id))
+    tailored=build_tailored_resume(job,doc)
     if not row:
-        tailored=build_tailored_resume(job,doc)
         row=ResumeVariant(job_id=job.id,source_document_id=doc.id,filename=tailored.filename,pdf=tailored.pdf,
                           extracted_text=tailored.extracted_text,strategy=tailored.strategy)
-        session.add(row);session.flush()
+        session.add(row)
+    else:
+        row.source_document_id=doc.id
+        row.filename=tailored.filename
+        row.pdf=tailored.pdf
+        row.extracted_text=tailored.extracted_text
+        row.strategy=tailored.strategy
+    session.flush()
     return SimpleNamespace(id=doc.id,filename=row.filename,pdf=row.pdf,extracted_text=row.extracted_text)
 
 def store_artifacts(session,application_id,result):
@@ -312,7 +319,8 @@ def run():
             if research.quality_score<45:
                 record_event(session,job.id,"discovered","research_skip",research.eligibility_notes);session.commit();continue
 
-            needs_rescore=existing is not None and (existing.rationale or "").startswith("Local keyword estimate")
+            force_rescore=os.getenv("FORCE_RESCORE","false").lower() in {"1","true","yes","on"}
+            needs_rescore=existing is not None and (force_rescore or (existing.rationale or "").startswith("Local keyword estimate"))
             if not existing or needs_rescore:
                 score,rationale,draft=ai_prepare(job,doc)
                 if existing:
