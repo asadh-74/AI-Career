@@ -64,16 +64,26 @@ def title_relevant(title:str)->bool:
 AGGREGATOR_PROVIDERS={"wwr","arbeitnow","remotive","jobicy","remoteok","himalayas"}
 
 def direct_apply_priority(job)->int:
-    """Prefer official company/ATS application URLs over aggregator listings."""
+    """Prefer direct forms that Career Atlas can complete reliably."""
     host=(urlparse(job.apply_url or "").hostname or "").lower()
     provider=(job.provider or "").lower()
-    if any(x in host for x in ("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com")):
+    company=(job.company or "").lower()
+    # Canonical's current Greenhouse forms repeatedly require protected
+    # demographic answers; keep the jobs visible but spend auto-submit time elsewhere.
+    if company=="canonical":
+        return 1
+    if provider in {"ashby","lever","levereu","smartrecruiters"}:
+        return 6
+    if any(x in host for x in ("ashbyhq.com","lever.co","smartrecruiters.com")):
+        return 6
+    if provider=="greenhouse" or "greenhouse.io" in host:
+        return 5
+    if any(x in host for x in ("myworkdayjobs.com","workdayjobs.com")):
         return 4
-    if provider in {"greenhouse","lever","levereu","ashby","smartrecruiters","indeed"} and provider not in AGGREGATOR_PROVIDERS:
+    if provider=="indeed":
         return 3
     if provider not in AGGREGATOR_PROVIDERS:
         return 2
-    # Aggregator jobs remain discoverable but rank after direct employer forms.
     return 0
 
 
