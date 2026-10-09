@@ -36,23 +36,14 @@ def build_tailored_resume(job,source_doc)->TailoredDocument:
     focus=shared[:18]
     strategy=("Prioritized verified overlap: "+", ".join(focus)) if focus else "Preserved source resume with no inferred additions."
 
-    # Keep recognizable resume lines and remove obvious extraction noise.
+    # Keep the source resume order intact. ATS tailoring adds a relevance
+    # focus line but never shuffles experience, education or chronology.
     lines=[]
     for raw in source.splitlines():
         line=re.sub(r"\s+"," ",raw).strip()
         if line and (not lines or line!=lines[-1]):
             lines.append(line)
-    # Reorder only by moving lines containing high-value shared terms near top,
-    # while preserving every line exactly once.
-    focus_set=set(focus[:10])
-    def relevance(line):
-        l=line.lower()
-        return sum(1 for t in focus_set if t in l)
-    indexed=list(enumerate(lines))
-    important=[x for x in indexed if relevance(x[1])>0]
-    important.sort(key=lambda x:(-relevance(x[1]),x[0]))
-    important_ids={i for i,_ in important[:12]}
-    ordered=[line for i,line in important[:12]]+[line for i,line in indexed if i not in important_ids]
+    ordered=lines
 
     buf=io.BytesIO()
     doc=SimpleDocTemplate(buf,pagesize=A4,rightMargin=15*mm,leftMargin=15*mm,topMargin=14*mm,bottomMargin=14*mm)
