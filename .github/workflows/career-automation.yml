@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-10-final-expanded-roles
+# direct-source-batch: 2026-10-10-job-specific-resume
 name: Career Atlas Automation
 
 on:
@@ -8,9 +8,10 @@ on:
     paths:
       - ".github/workflows/career-automation.yml"
   schedule:
-    # 05:30 and 07:30 Pakistan time (UTC+5)
+    # 05:30, 07:30 and 17:30 Pakistan time (UTC+5)
     - cron: "30 0 * * *"
     - cron: "30 2 * * *"
+    - cron: "30 12 * * *"
 
 concurrency:
   group: career-atlas-auto-apply
@@ -31,7 +32,7 @@ jobs:
       GEMINI_MODEL: gemini-3.8-flash
       AUTO_APPLY: "true"
       MIN_MATCH_SCORE: "75"
-      MAX_APPLICATIONS_PER_DAY: "10"
+      MAX_APPLICATIONS_PER_DAY: "15"
       REMOTE_ONLY: "true"
       ALLOW_EMAIL_APPLICATIONS: "true"
       ALLOW_BROWSER_APPLICATIONS: "true"
