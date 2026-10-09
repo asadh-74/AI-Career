@@ -1,4 +1,4 @@
-# retry-token: form-scope-v3
+# retry-token: whippy-backend-tailored-2026-10-10
 name: Apply One Job Now
 
 on:
@@ -24,17 +24,18 @@ jobs:
       MIN_MATCH_SCORE: "75"
       MAX_APPLICATIONS_PER_DAY: "1"
       REMOTE_ONLY: "true"
-      ALLOW_EMAIL_APPLICATIONS: "true"
+      ALLOW_EMAIL_APPLICATIONS: "false"
       ALLOW_BROWSER_APPLICATIONS: "true"
       ALLOW_INDEED: "true"
       ALLOW_GLASSDOOR: "false"
       AUTO_SUBMIT_BROWSER: "true"
-      TARGET_JOB_URL: "https://www.cloudlabweb.com/careers/junior-full-stack-engineer"
-      TARGET_JOB_TITLE: "Junior Full-Stack Engineer"
-      TARGET_JOB_COMPANY: "CloudLab Technologies"
-      TARGET_JOB_LOCATION: "Karachi, Pakistan / Remote"
-      TARGET_JOB_PROVIDER: "Indeed"
-      TARGET_JOB_DESCRIPTION: "Full-time remote junior full-stack engineering role for candidates 0-2 years out. Requires solid CS fundamentals, a non-trivial shipped project, React and a modern backend such as Python, Node or Go, with interest in AI/LLM engineering."
+      TAILOR_RESUME: "true"
+      TARGET_JOB_URL: "https://jobs.ashbyhq.com/whippy/cb194715-61e9-4c5f-b8ac-ca1ca962cc4a/application"
+      TARGET_JOB_TITLE: "Software Engineer: Backend"
+      TARGET_JOB_COMPANY: "Whippy"
+      TARGET_JOB_LOCATION: "Remote - Worldwide"
+      TARGET_JOB_PROVIDER: "Ashby"
+      TARGET_JOB_DESCRIPTION: "Remote worldwide backend software engineering role at an AI-powered communications company. Build scalable, well-documented web APIs, backend services, tests, product analytics and Postgres-backed systems. Work across planning, implementation, rollout and monitoring in a distributed asynchronous team; product uses AI agents for communication automation."
       APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
       SMTP_HOST: ${{ secrets.SMTP_HOST }}
       SMTP_PORT: ${{ secrets.SMTP_PORT }}
