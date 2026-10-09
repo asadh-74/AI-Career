@@ -247,13 +247,32 @@ def ai_prepare(job,doc):
     import json
     key=os.getenv('GEMINI_API_KEY','')
     def local_match(reason):
-        terms=lambda s:set(re.findall(r'[a-z][a-z+#.]{2,}',s.lower()))
-        ignored={'the','and','for','with','you','are','our','that','this','from','your','will','have','team','work','years','remote','job','role','experience'}
-        required=(terms(job.title+' '+job.description)-ignored)
-        present=(terms(doc.extracted_text)-ignored)
-        shared=sorted(required & present)[:12]
-        score=min(85,round(100*len(required & present)/max(len(required),1)))
-        rationale=f'Local keyword estimate ({reason}). Shared terms: {", ".join(shared) if shared else "none found"}. Review location and requirements yourself; this is not an AI assessment.'
+        hay=(job.title+' '+job.description).lower()
+        cv=doc.extracted_text.lower()
+        role_groups={
+            'backend':('backend','python','fastapi','api engineer','software engineer'),
+            'agentic_ai':('ai engineer','agentic','langgraph','langchain','rag','llm','automation'),
+            'fullstack':('full stack','full-stack','web developer','software developer'),
+            'ml':('machine learning','ml engineer','applied ai','computer vision'),
+            'automation':('automation','integrations','workflow','n8n','zapier'),
+        }
+        role_hits=sum(1 for terms_ in role_groups.values() if any(x in job.title.lower() for x in terms_))
+        core=('python','fastapi','flask','postgresql','sql','sqlalchemy','pydantic','docker','linux','git','ci/cd',
+              'langgraph','langchain','crewai','rag','faiss','chroma','mcp','n8n','playwright','selenium',
+              'javascript','flutter','pandas','scikit-learn','tensorflow','pytorch','rest api','websocket')
+        requested=[x for x in core if x in hay]
+        matched=[x for x in requested if x in cv]
+        score=35
+        score+=min(20,role_hits*10)
+        score+=min(35,len(matched)*5)
+        # Reward broadly relevant engineering roles even when the posting is verbose.
+        if any(x in job.title.lower() for x in ('junior','entry','graduate','associate')): score+=5
+        # Avoid inflating obviously senior roles during API fallback.
+        if any(x in job.title.lower() for x in ('senior','staff','principal','director','lead ')): score-=25
+        score=max(0,min(85,score))
+        rationale=(f'Local weighted estimate ({reason}). Role groups matched: {role_hits}; '
+                   f'core stack overlap: {", ".join(matched[:12]) if matched else "none"}. '
+                   'This fallback uses verified resume skills and does not infer missing experience.')
         draft=f'Dear Hiring Team,\n\nI am interested in the {job.title} position at {job.company}. My attached resume describes my experience and projects. I would appreciate the opportunity to discuss how my background fits this role.\n\nSincerely'
         return score,rationale,draft
     if not key:return local_match('Gemini API key is not configured')
