@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-10-job-specific-resume
+# direct-source-batch: 2026-10-10-safe-tailored-batch
 name: Career Atlas Automation
 
 on:
@@ -15,7 +15,7 @@ on:
 
 concurrency:
   group: career-atlas-auto-apply
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply:
