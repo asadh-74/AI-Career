@@ -140,9 +140,9 @@ def difficulty_for(job)->int:
     host=(urlparse(job.apply_url or "").hostname or "").lower()
     p=(job.provider or "").lower()
     score=45
-    if any(x in host for x in ("lever.co","greenhouse.io","ashbyhq.com")): score-=15
+    if any(x in host for x in ("lever.co","greenhouse.io","ashbyhq.com","smartrecruiters.com")): score-=22
     if "workday" in host: score+=25
-    if any(x in p for x in ("remoteok","jobicy","remotive","wwr","himalayas")): score+=10
+    if any(x in p for x in ("remoteok","jobicy","remotive","wwr","himalayas","arbeitnow")): score+=30
     if len(job.description or "")>7000: score+=5
     return max(5,min(95,score))
 
