@@ -303,6 +303,8 @@ def ensure_priority_sources(session):
         ("CrewBloom","Ashby","crewbloom"),
         ("TensorOps","Greenhouse","tensorops"),
         ("Motive","Greenhouse","gomotive"),
+        ("Whippy","Ashby","whippy"),
+        ("Enveritas","Greenhouse","enveritas"),
     )
     added=0
     for company,provider,slug in specs:
