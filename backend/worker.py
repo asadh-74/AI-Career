@@ -267,6 +267,33 @@ def process_recruiter_mail(session,doc,stats):
             session.add(InterviewPrep(application_id=app.id,content=prep))
     stats["recruiterMessages"]=matched_count
 
+def cleanup_invalid_email_submissions(session):
+    """Undo legacy false positives caused by non-recruiting contact emails."""
+    bad=("accommodation","accessibility","reasonable","privacy","legal","support","help","security","press","media","billing","compliance")
+    fixed=0
+    rows=session.execute(
+        select(Application,Job,JobStatus)
+        .join(Job,Job.id==Application.job_id)
+        .join(JobStatus,JobStatus.job_id==Job.id)
+        .where(Application.status=="applied",JobStatus.status=="submitted")
+    ).all()
+    for app,job,status in rows:
+        receipt=(app.receipt or "").lower()
+        if not receipt.startswith("email:"):continue
+        address=receipt.split(":",1)[1]
+        local=address.split("@",1)[0]
+        if any(x in local for x in bad):
+            reason="Legacy email route used a non-recruiting contact; application requires official-form submission."
+            app.status="needs_human"
+            app.receipt=reason
+            status.status="not_submitted"
+            status.note=reason
+            status.updated_at=datetime.now(timezone.utc)
+            record_event(session,job.id,"applying","invalid_email_receipt",reason,application_id=app.id)
+            fixed+=1
+    if fixed:session.flush()
+    return fixed
+
 def ensure_priority_sources(session):
     """Maintain a small curated set of public direct employer boards."""
     specs=(
@@ -296,6 +323,7 @@ def run():
            "needsAttention":0,"failed":0,"alreadyApplied":0,"duplicatesSkipped":0,"retried":0}
 
     with SessionLocal() as session:
+        stats["invalidEmailSubmissionsCorrected"]=cleanup_invalid_email_submissions(session)
         stats["prioritySourcesAdded"]=ensure_priority_sources(session)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
