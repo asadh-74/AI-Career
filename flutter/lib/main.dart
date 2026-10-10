@@ -370,7 +370,8 @@ class _WorkspaceState extends State<Workspace> {
           ...visible.map((item){
             final a=item as Map;
             final related=jobs.where((j)=>j['id']==a['jobId']).toList();
-            final job=related.isEmpty?null:related.first as Map?;
+            final embedded=(a['title']!=null || a['company']!=null || a['applyUrl']!=null)?a:null;
+            final job=related.isEmpty?(embedded as Map?):related.first as Map?;
             final needs=a['status']=='needs_human';
             final receipt=(a['receipt']??'').toString();
             final submitted=statusFor(a['jobId'] as int)=='submitted';
