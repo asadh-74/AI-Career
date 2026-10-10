@@ -91,6 +91,15 @@ def _browser_attempt(state: ApplicationState) -> ApplicationState:
     return {**state, "route": "done", "result": result}
 
 
+def _review_gate(state: ApplicationState) -> ApplicationState:
+    result=state.get("result") or {}
+    if result.get("status")=="needs_human" and result.get("review_fields"):
+        return {**state,"route":"await_review","result":{**result,"graph_state":"awaiting_review"}}
+    return {**state,"route":"done"}
+
+def _route_after_browser(state: ApplicationState) -> str:
+    return "review" if state.get("route")=="await_review" else "stop"
+
 def _route_after_score(state: ApplicationState) -> str:
     return "stop" if state.get("route") == "below_threshold" else "email"
 
@@ -103,6 +112,7 @@ _builder = StateGraph(ApplicationState)
 _builder.add_node("score_gate", _score_gate)
 _builder.add_node("email", _email_attempt)
 _builder.add_node("browser", _browser_attempt)
+_builder.add_node("review_gate", _review_gate)
 _builder.set_entry_point("score_gate")
 _builder.add_conditional_edges(
     "score_gate",
@@ -114,7 +124,12 @@ _builder.add_conditional_edges(
     _route_after_email,
     {"stop": END, "browser": "browser"},
 )
-_builder.add_edge("browser", END)
+_builder.add_edge("browser", "review_gate")
+_builder.add_conditional_edges(
+    "review_gate",
+    _route_after_browser,
+    {"review": END, "stop": END},
+)
 APPLICATION_GRAPH = _builder.compile()
 
 
