@@ -779,25 +779,18 @@ def v3_review_submit(application_id:int,body:ReviewSubmitIn,background_tasks:Bac
     job=session.get(Job,application.job_id)
     rows=_ensure_review_fields(session,application)
     by_id={row.id:row for row in rows}
-    manual_only=[row.label_key for row in rows if row.sensitive]
     for entry in body.answers:
         row=by_id.get(entry.field_id)
-        if not row or row.sensitive: continue
+        if not row: continue
+        # Protected answers are accepted only because the user explicitly
+        # entered them for this one application. They are never inferred.
         row.answer=entry.answer.strip()[:2000]
         row.updated_at=datetime.now(timezone.utc)
     session.flush()
-    missing=[row.label_key for row in rows if not row.sensitive and not (row.answer or '').strip()]
+    missing=[row.label_key for row in rows if not (row.answer or '').strip()]
     if missing:
         session.commit()
-        return {'status':'needs_answers','missing':missing[:12],'manualOnly':manual_only}
-    if manual_only:
-        session.commit()
-        return {
-            'status':'manual_required',
-            'manualOnly':manual_only,
-            'message':'This employer requires protected demographic information. Career Atlas will not guess or auto-fill it.'
-        }
-    application.status='ready_for_retry'
+        return {'status':'needs_answers','missing':missing[:12]}
     application.status='ready_for_retry'
     application.receipt='Review answers saved. Career Atlas will refill all known fields and retry automatically.'
     record_event(session,application.job_id,'applying','review_answers_saved',
