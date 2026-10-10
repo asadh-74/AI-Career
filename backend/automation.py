@@ -364,11 +364,54 @@ def _fill_learned_answers(page,learned_answers):
                     if typ in ("checkbox","radio"):
                         if bool(value):loc.first.check();filled.append(label);continue
                     loc.first.fill(str(value));filled.append(label);continue
+            if label and _select_known_answer(page,re.escape(label),value):
+                filled.append(label);continue
+            if label and _select_or_fill_labeled(page,re.escape(label),value):
+                filled.append(label);continue
             if label and _fill(page,re.escape(label),value):
                 filled.append(label)
         except Exception:
             pass
     return filled
+
+def review_fields_from_reason(reason):
+    """Convert a human-readable blocker into structured review fields."""
+    fields=[]
+    for raw in [x.strip() for x in (reason or "").split(" | ") if x.strip()]:
+        low=raw.lower()
+        sensitive="sensitive/uncertain question:" in low
+        unknown="unknown required field:" in low
+        validation=low.startswith("invalid fields:")
+        if sensitive:
+            label=raw.split(":",1)[1].strip()
+        elif unknown:
+            label=raw.split(":",1)[1].strip()
+            label=re.sub(r"<[^>]+>"," ",label)
+            label=re.sub(r"\s+"," ",label).strip()
+        elif validation:
+            label=raw.split(":",1)[1].strip()
+        else:
+            # Follow-on validation entries arrive as separate pipe-delimited
+            # labels after the initial "Invalid fields:" marker.
+            if any(x in low for x in ("question_","select...","country","linkedin","degree","proficiency","master","bachelor","legally")):
+                label=raw
+                validation=True
+            else:
+                continue
+        label=re.sub(r"\s+"," ",label).strip()
+        if not label or len(label)>320:
+            label=label[:320]
+        # Skip generic container text that is not a real question.
+        if "apply for this job" in label.lower() and "first name" in label.lower() and "email" in label.lower():
+            continue
+        item={
+            "label":label,
+            "sensitive":bool(sensitive or needs_human(label)),
+            "kind":"sensitive" if (sensitive or needs_human(label)) else ("validation" if validation else "answer"),
+            "selector_hint":"",
+        }
+        if item not in fields:fields.append(item)
+    return fields[:12]
 
 def _sensitive_or_unknown_required(page,sensitive_filled=None):
     root=application_root(page)
@@ -658,7 +701,8 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                                 break
                         except Exception:
                             pass
-                    if blocker:return {"status":"needs_human","reason":blocker}
+                    if blocker:
+                        return {"status":"needs_human","reason":blocker,"review_fields":review_fields_from_reason(blocker)}
 
                     if not AutomationConfig.from_env().auto_submit_browser:
                         return {"status":"ready","reason":"Form filled; AUTO_SUBMIT_BROWSER is disabled"}
@@ -746,7 +790,19 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         invalid=list(dict.fromkeys(invalid))[:10]
                         if invalid:
                             diag+=" Invalid fields: "+" | ".join(invalid)
-                        return {"status":"needs_human","reason":"Submit was clicked but reliable confirmation was not detected."+diag,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
+                        reason="Submit was clicked but reliable confirmation was not detected."+diag
+                        review_fields=[]
+                        for label in invalid:
+                            low=(label or "").lower()
+                            if "apply for this job" in low and "first name" in low and "email" in low:
+                                continue
+                            review_fields.append({
+                                "label":label[:320],
+                                "sensitive":bool(needs_human(label)),
+                                "kind":"sensitive" if needs_human(label) else "validation",
+                                "selector_hint":"",
+                            })
+                        return {"status":"needs_human","reason":reason,"review_fields":review_fields[:12],"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
                     if nxt is None:nxt=_find_next(active_scope)
                     if nxt is not None:
