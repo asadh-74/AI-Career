@@ -150,6 +150,13 @@ def extract_review_questions(reason:str)->list[dict]:
     chunks.extend(m.group(1).strip(" |") for m in pattern.finditer(reason) if m.group(1).strip())
     seen=set();out=[]
     for raw in chunks:
+        raw_low=raw.lower()
+        # Browser/ATS validation proxy controls are implementation details,
+        # not questions the applicant should ever see.
+        if ('aria-hidden="true"' in raw_low or "aria-hidden='true'" in raw_low
+            or 'tabindex="-1"' in raw_low or "tabindex='-1'" in raw_low
+            or "requiredinput" in raw_low):
+            continue
         text=re.sub(r"<[^>]+>"," ",raw)
         text=re.sub(r"\s+"," ",text).strip()
         if not text:continue
