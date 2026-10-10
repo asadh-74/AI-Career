@@ -457,6 +457,9 @@ class _WorkspaceState extends State<Workspace> {
             final embedded=(a['title']!=null || a['company']!=null || a['applyUrl']!=null)?a:null;
             final job=related.isEmpty?(embedded as Map?):related.first as Map?;
             final needs=a['status']=='needs_human';
+            final queued=a['status']=='ready_for_retry' || a['reviewQueued']==true;
+            final reviewQuestions=(a['reviewQuestions'] as List? ?? []);
+            final unanswered=reviewQuestions.where((q)=>(q as Map)['answered']!=true).length;
             final receipt=(a['receipt']??'').toString();
             final submitted=statusFor(a['jobId'] as int)=='submitted';
             return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
@@ -465,25 +468,32 @@ class _WorkspaceState extends State<Workspace> {
                   Text(job?['title']??'Job #${a['jobId']}',style:Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight:FontWeight.bold)),
                   Text('${job?['company']??''} · ${job?['provider']??''}'),
                 ])),
-                Chip(label:Text(needs?'Needs review':(submitted?'Submitted':(a['status']??'Prepared').toString().replaceAll('_',' '))))
+                Chip(label:Text(queued?'Agent retry queued':(needs?'Needs review':(submitted?'Submitted':(a['status']??'Prepared').toString().replaceAll('_',' ')))))
               ]),
               Text('Match score: ${a['score']}'),
-              if(needs && receipt.isNotEmpty)Container(
+              if(needs)Container(
                 width:double.infinity,
                 margin:const EdgeInsets.only(top:8,bottom:8),
                 padding:const EdgeInsets.all(10),
                 decoration:BoxDecoration(color:Colors.amber.withValues(alpha:.12),borderRadius:BorderRadius.circular(10)),
                 child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                  const Text('Agent blocker',style:TextStyle(fontWeight:FontWeight.bold)),
+                  Text(reviewQuestions.isNotEmpty?'Your input needed: $unanswered field${unanswered==1?'':'s'}':'Technical form blocker',style:const TextStyle(fontWeight:FontWeight.bold)),
                   const SizedBox(height:4),
-                  SelectableText(receipt),
+                  if(reviewQuestions.isNotEmpty)
+                    ...reviewQuestions.where((q)=>(q as Map)['answered']!=true).take(5).map((q)=>Padding(
+                      padding:const EdgeInsets.only(bottom:3),
+                      child:Text('• ${q['label']}${q['sensitive']==true?'  (answer yourself)':''}'),
+                    ))
+                  else
+                    Text(receipt,maxLines:3,overflow:TextOverflow.ellipsis),
                 ]),
               ),
               if((a['rationale']??'').toString().isNotEmpty)Text(a['rationale']??''),
               if((a['draft']??'').toString().isNotEmpty)ExpansionTile(title:const Text('Read application draft'),children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(a['draft']??''))]),
               Wrap(spacing:8,runSpacing:8,children:[
                 OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
-                if(needs)FilledButton.icon(onPressed:()=>reviewWithAgent(a),icon:const Icon(Icons.auto_awesome),label:const Text('Answer missing fields')),
+                if(needs && reviewQuestions.isNotEmpty)FilledButton.icon(onPressed:()=>reviewWithAgent(a),icon:const Icon(Icons.auto_awesome),label:Text('Answer $unanswered field${unanswered==1?'':'s'} & retry')),
+                if(queued)const Chip(avatar:Icon(Icons.autorenew,size:16),label:Text('LangGraph retrying')),
                 if(needs)OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Open form manually ↗')),
                 if(!submitted)FilledButton.icon(onPressed:()=>confirmApplication(a),icon:const Icon(Icons.check_circle_outline),label:const Text('I submitted this')),
               ]),
