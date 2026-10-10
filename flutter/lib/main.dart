@@ -171,14 +171,29 @@ class _WorkspaceState extends State<Workspace> {
 
   Future<void> confirmApplication(Map application) async {
     final receipt=TextEditingController();
-    await showDialog(context:context,builder:(c)=>AlertDialog(title:const Text('Record submitted application'),content:Column(mainAxisSize:MainAxisSize.min,children:[
-      const Text('Only confirm after the employer website shows a successful submission. Enter its confirmation text, number or email subject.'),
-      TextField(controller:receipt,decoration:const InputDecoration(labelText:'Employer confirmation')),
-    ]),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Cancel')),FilledButton(onPressed:()async{
-      if(receipt.text.trim().isEmpty)return;
-      try{await api.request('POST','applications/${application['id']}/confirm',{'receipt':receipt.text.trim()});if(c.mounted)Navigator.pop(c);await reload();}
-      catch(e){message('$e');}
-    },child:const Text('Mark applied'))]));receipt.dispose();
+    await showDialog(context:context,builder:(c)=>AlertDialog(
+      title:const Text('I submitted this application'),
+      content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Use this only after you have actually submitted the employer form. Career Atlas will move it to Submitted and update the dashboard immediately.'),
+        const SizedBox(height:10),
+        TextField(controller:receipt,decoration:const InputDecoration(
+          labelText:'Confirmation (optional)',
+          hintText:'e.g. Thank you for applying, confirmation number, or email subject'
+        )),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Cancel')),
+        FilledButton.icon(onPressed:()async{
+          try{
+            await api.request('POST','applications/${application['id']}/confirm',{'receipt':receipt.text.trim()});
+            if(c.mounted)Navigator.pop(c);
+            await reload();
+            if(mounted)setState(()=>tab=2);
+            message('Application moved to Submitted.');
+          }catch(e){message('$e');}
+        },icon:const Icon(Icons.check_circle_outline),label:const Text('I submitted it'))
+      ],
+    ));receipt.dispose();
   }
   @override Widget build(BuildContext context){
     final wide=MediaQuery.sizeOf(context).width>760;
@@ -250,7 +265,7 @@ class _WorkspaceState extends State<Workspace> {
         const SizedBox(height:10),Wrap(spacing:8,runSpacing:8,children:[
           OutlinedButton(onPressed:()=>open(j['applyUrl']),child:const Text('Official form ↗')),
           OutlinedButton(onPressed:busy?null:documents.isEmpty?()=>upload('Resume'):()=>prepare(j,documents.any((d)=>d['kind']=='Resume')?'Resume':'CV'),child:Text(documents.isEmpty?'Upload resume for AI match':'Match & draft')),
-          OutlinedButton(onPressed:()=>markStatus(j,submitted?'not_submitted':'submitted'),child:Text(submitted?'Mark not submitted':'Mark submitted')),
+          OutlinedButton(onPressed:()=>markStatus(j,submitted?'not_submitted':'submitted'),child:Text(submitted?'Undo submitted':'I submitted this')),
         ])
       ])));
     }))
@@ -306,6 +321,7 @@ class _WorkspaceState extends State<Workspace> {
               Wrap(spacing:8,runSpacing:8,children:[
                 OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
                 if(needs)FilledButton.tonal(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Review & finish')),
+                if(!submitted)FilledButton.icon(onPressed:()=>confirmApplication(a),icon:const Icon(Icons.check_circle_outline),label:const Text('I submitted this')),
               ]),
             ])));
           }),
