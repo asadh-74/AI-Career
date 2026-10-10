@@ -395,9 +395,40 @@ def locate_application(body:LocateApplicationIn,session:Session=Depends(db)):
     if parsed.scheme not in ('http','https') or not parsed.hostname:
         raise HTTPException(400,'Paste a valid employer application or confirmation URL')
 
-    # Greenhouse and several ATS products append /confirmation to the original
-    # job URL after a successful manual submission.
-    clean_path=re.sub(r'/confirmation/?    rows=session.execute(
+    clean_path=re.sub(r'/confirmation/?$','',parsed.path.rstrip('/'),flags=re.I)
+    clean=f'{parsed.scheme}://{parsed.netloc}{clean_path}'
+    matched=None
+    stable_tokens=re.findall(r'[A-Za-z0-9_-]{8,}',clean_path)
+    for job in session.scalars(select(Job)).all():
+        for candidate in (job.apply_url,job.url):
+            if not candidate:
+                continue
+            cp=urlparse(candidate)
+            canonical=f'{cp.scheme}://{cp.netloc}{cp.path.rstrip("/")}'
+            if canonical==clean:
+                matched=job
+                break
+            if stable_tokens and (cp.hostname or '').lower()==(parsed.hostname or '').lower():
+                if any(token in cp.path for token in stable_tokens[-3:]):
+                    matched=job
+                    break
+        if matched:
+            break
+
+    if not matched:
+        raise HTTPException(404,'No Career Atlas job matches that confirmation URL')
+
+    application=session.scalar(select(Application).where(Application.job_id==matched.id))
+    return {
+        'job':job_out(matched),
+        'application':app_out(application) if application else None,
+        'cleanUrl':clean,
+        'matchedBy':'confirmation_url',
+    }
+
+@app.get('/api/applications/submitted', dependencies=[Depends(auth)])
+def submitted_applications(session:Session=Depends(db)):
+    rows=session.execute(
         select(Application,Job,JobStatus)
         .join(Job,Job.id==Application.job_id)
         .join(JobStatus,JobStatus.job_id==Application.job_id)
@@ -416,6 +447,7 @@ def locate_application(body:LocateApplicationIn,session:Session=Depends(db)):
         "receipt":a.receipt or s.note,
         "submittedAt":s.updated_at.isoformat(),
     } for a,j,s in rows]
+
 @app.post('/api/applications/{application_id}/confirm', dependencies=[Depends(auth)])
 def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
     item=session.get(Application,application_id)
