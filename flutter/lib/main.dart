@@ -215,6 +215,90 @@ class _WorkspaceState extends State<Workspace> {
     controller.dispose();
   }
 
+  Future<void> reviewWithAgent(Map application) async {
+    try{
+      final payload=Map<String,dynamic>.from(await api.request('GET','v3/applications/${application['id']}/review-fields') as Map);
+      final fields=(payload['fields'] as List? ?? []).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
+      if(fields.isEmpty){
+        message('The agent did not detect a specific answer field. This form needs an adapter update rather than you refilling the whole form.');
+        return;
+      }
+      final controllers=<int,TextEditingController>{};
+      for(final field in fields){
+        controllers[field['id'] as int]=TextEditingController(text:(field['answer']??'').toString());
+      }
+      if(!mounted)return;
+      await showDialog(context:context,builder:(dialogContext)=>StatefulBuilder(builder:(dialogContext,setLocal){
+        bool sending=false;
+        return AlertDialog(
+          title:Text('Answer only the missing fields · ${payload['company']??''}'),
+          content:SizedBox(
+            width:620,
+            child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+              const Text('Career Atlas will refill your name, email, phone, LinkedIn, tailored resume and every other known field. Answer only the questions below, then the LangGraph agent will retry the full application automatically.'),
+              const SizedBox(height:12),
+              ...fields.map((field){
+                final sensitive=field['sensitive']==true;
+                return Padding(
+                  padding:const EdgeInsets.only(bottom:14),
+                  child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                    Text(field['label']??'',style:const TextStyle(fontWeight:FontWeight.w600)),
+                    if(sensitive)Padding(
+                      padding:const EdgeInsets.only(top:4,bottom:6),
+                      child:Text(
+                        'This answer will be used only for this application and will not be inferred or reused.',
+                        style:TextStyle(color:Colors.orange.shade800,fontSize:12),
+                      ),
+                    ),
+                    TextField(
+                      controller:controllers[field['id'] as int],
+                      minLines:1,
+                      maxLines:4,
+                      decoration:InputDecoration(
+                        hintText:sensitive?'Enter your answer for this application':'Enter answer',
+                        border:const OutlineInputBorder(),
+                      ),
+                    ),
+                  ]),
+                );
+              }),
+            ])),
+          ),
+          actions:[
+            TextButton(onPressed:sending?null:()=>Navigator.pop(dialogContext),child:const Text('Cancel')),
+            FilledButton.icon(
+              onPressed:sending?null:()async{
+                final answers=fields.map((field)=>({
+                  'field_id':field['id'],
+                  'answer':controllers[field['id'] as int]!.text.trim(),
+                })).toList();
+                if(answers.any((x)=>(x['answer'] as String).isEmpty)){
+                  message('Please answer each listed review question.');return;
+                }
+                setLocal(()=>sending=true);
+                try{
+                  final result=await api.request('POST','v3/applications/${application['id']}/review-submit',{'answers':answers});
+                  if(result['status']=='retry_started'){
+                    if(dialogContext.mounted)Navigator.pop(dialogContext);
+                    message('Answers saved. LangGraph is refilling the complete form and retrying submission now.');
+                    await reload();
+                    Future.delayed(const Duration(seconds:20),(){if(mounted)reload();});
+                  }else{
+                    message((result['missing'] as List?)?.join(' · ') ?? 'More information is still required.');
+                  }
+                }catch(e){message('$e');}
+                finally{if(dialogContext.mounted)setLocal(()=>sending=false);}
+              },
+              icon:const Icon(Icons.auto_awesome),
+              label:Text(sending?'Starting agent…':'Save & let agent finish'),
+            ),
+          ],
+        );
+      }));
+      for(final controller in controllers.values){controller.dispose();}
+    }catch(e){message('$e');}
+  }
+
   Future<void> confirmApplication(Map application) async {
     final receipt=TextEditingController();
     await showDialog(context:context,builder:(c)=>AlertDialog(
@@ -399,7 +483,8 @@ class _WorkspaceState extends State<Workspace> {
               if((a['draft']??'').toString().isNotEmpty)ExpansionTile(title:const Text('Read application draft'),children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(a['draft']??''))]),
               Wrap(spacing:8,runSpacing:8,children:[
                 OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
-                if(needs)FilledButton.tonal(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Review & finish')),
+                if(needs)FilledButton.icon(onPressed:()=>reviewWithAgent(a),icon:const Icon(Icons.auto_awesome),label:const Text('Answer missing fields')),
+                if(needs)OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Open form manually ↗')),
                 if(!submitted)FilledButton.icon(onPressed:()=>confirmApplication(a),icon:const Icon(Icons.check_circle_outline),label:const Text('I submitted this')),
               ]),
             ])));
