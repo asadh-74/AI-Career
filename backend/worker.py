@@ -243,11 +243,15 @@ def cleanup_false_review_fields(session):
     rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.resolved==False)).all()
     for row in rows:
         low=(row.label_key or "").lower()
-        if any(x in low for x in ('aria-hidden="true"',"aria-hidden='true'",'tabindex="-1"',"tabindex='-1'","requiredinput")):
+        if (low.strip()=="unlabelled required field"
+            or any(x in low for x in ('aria-hidden="true"',"aria-hidden='true'",'tabindex="-1"',"tabindex='-1'","requiredinput"))):
             row.resolved=True
             row.answer=""
             row.updated_at=datetime.now(timezone.utc)
             fixed+=1
+        elif low.startswith("funanswer funanswer"):
+            row.label_key="There are no wrong answers — we just want to see how you think."
+            row.updated_at=datetime.now(timezone.utc)
     if fixed:session.flush()
     return fixed
 
