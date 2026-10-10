@@ -151,6 +151,7 @@ def review_answers_for(session,application_id):
         select(ReviewAnswer).where(
             ReviewAnswer.application_id==application_id,
             ReviewAnswer.resolved==False,
+            ReviewAnswer.sensitive==False,
         )
     ).all()
     return [
@@ -616,9 +617,17 @@ def retry_application(application_id:int):
         app=session.get(Application,application_id)
         if not app:
             return {"status":"not_found"}
+        sensitive=session.scalars(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.resolved==False,
+            ReviewAnswer.sensitive==True,
+        )).all()
+        if sensitive:
+            return {"status":"manual_required","missing":[r.label_key for r in sensitive[:12]]}
         pending=session.scalars(select(ReviewAnswer).where(
             ReviewAnswer.application_id==application_id,
             ReviewAnswer.resolved==False,
+            ReviewAnswer.sensitive==False,
         )).all()
         missing=[r.label_key for r in pending if not (r.answer or "").strip()]
         if missing:
