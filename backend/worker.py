@@ -181,7 +181,6 @@ def review_answers_for(session,application_id):
         select(ReviewAnswer).where(
             ReviewAnswer.application_id==application_id,
             ReviewAnswer.resolved==False,
-            ReviewAnswer.sensitive==False,
         )
     ).all()
     return [
