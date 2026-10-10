@@ -237,6 +237,54 @@ def resolve_review_fields(session,application_id):
             row.answer=""
         row.updated_at=datetime.now(timezone.utc)
 
+def backfill_review_queue(session):
+    """Convert legacy needs_human receipts into structured review rows.
+
+    This makes the existing review backlog immediately usable by the
+    answer-only Career Atlas UI without reopening each employer form first.
+    """
+    created=0
+    rows=session.execute(
+        select(Application,Job)
+        .join(Job,Job.id==Application.job_id)
+        .where(Application.status=="needs_human")
+    ).all()
+    for application,job in rows:
+        existing=session.scalars(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application.id,
+            ReviewAnswer.resolved==False,
+        )).all()
+        if existing:
+            continue
+        questions=extract_review_questions(application.receipt or "")
+        if not questions:
+            continue
+        for item in questions:
+            label=(item.get("label") or "").strip()[:500]
+            if not label:
+                continue
+            row=session.scalar(select(ReviewAnswer).where(
+                ReviewAnswer.application_id==application.id,
+                ReviewAnswer.label_key==label,
+            ))
+            if not row:
+                row=ReviewAnswer(
+                    application_id=application.id,
+                    label_key=label,
+                    answer="",
+                    selector_hint=(item.get("selector_hint") or "")[:500],
+                    sensitive=bool(item.get("sensitive")),
+                    resolved=False,
+                )
+                session.add(row);created+=1
+            else:
+                row.sensitive=bool(item.get("sensitive"))
+                row.resolved=False
+                row.updated_at=datetime.now(timezone.utc)
+    if created:
+        session.flush()
+    return created
+
 def count_learned_successes(session,job,result):
     used=((result.get("meta") or {}).get("learnedFields") or [])
     if not used:return
@@ -432,6 +480,7 @@ def run(target_job_id_override=None):
     with SessionLocal() as session:
         stats["invalidEmailSubmissionsCorrected"]=cleanup_invalid_email_submissions(session)
         stats["prioritySourcesAdded"]=ensure_priority_sources(session)
+        stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
