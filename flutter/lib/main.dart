@@ -220,92 +220,78 @@ class _WorkspaceState extends State<Workspace> {
       final payload=Map<String,dynamic>.from(await api.request('GET','v3/applications/${application['id']}/review-fields') as Map);
       final fields=(payload['fields'] as List? ?? []).map((x)=>Map<String,dynamic>.from(x as Map)).toList();
       if(fields.isEmpty){
-        message('The agent did not detect a specific answer field. This form needs an adapter update rather than you refilling the whole form.');
+        message('No answer is needed from you. This is a technical form-adapter issue, so do not refill the whole form manually.');
         return;
       }
-      final safeFields=fields.where((f)=>f['sensitive']!=true).toList();
-      final manualFields=fields.where((f)=>f['sensitive']==true).toList();
       final controllers=<int,TextEditingController>{};
-      for(final field in safeFields){
+      for(final field in fields){
         controllers[field['id'] as int]=TextEditingController(text:(field['answer']??'').toString());
       }
       if(!mounted)return;
-      bool sending=false;
       await showDialog(context:context,builder:(dialogContext)=>StatefulBuilder(builder:(dialogContext,setLocal){
+        bool sending=false;
         return AlertDialog(
           title:Text('Answer only the missing fields · ${payload['company']??''}'),
           content:SizedBox(
-            width:620,
+            width:640,
             child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-              const Text('Career Atlas will refill your name, email, phone, LinkedIn, tailored resume and every other verified field. Answer only the unresolved questions below; LangGraph will retry the complete application automatically.'),
+              const Text('Career Atlas will refill your name, email, phone, links, education, tailored résumé and every other known field automatically. You only answer the unresolved items below.'),
               const SizedBox(height:12),
-              ...safeFields.map((field)=>Padding(
+              ...fields.map((field)=>Padding(
                 padding:const EdgeInsets.only(bottom:14),
                 child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                   Text(field['label']??'',style:const TextStyle(fontWeight:FontWeight.w600)),
-                  const SizedBox(height:6),
+                  if(field['sensitive']==true)Padding(
+                    padding:const EdgeInsets.only(top:4,bottom:6),
+                    child:Text(
+                      'Personal/protected question — Career Atlas will use only the answer you provide for this application. It will not guess it or reuse it for other applications.',
+                      style:TextStyle(color:Colors.orange.shade800,fontSize:12),
+                    ),
+                  ),
+                  const SizedBox(height:5),
                   TextField(
                     controller:controllers[field['id'] as int],
-                    minLines:1,maxLines:4,
-                    decoration:const InputDecoration(hintText:'Enter answer',border:OutlineInputBorder()),
+                    minLines:1,
+                    maxLines:4,
+                    decoration:const InputDecoration(
+                      hintText:'Your answer',
+                      border:OutlineInputBorder(),
+                    ),
                   ),
                 ]),
               )),
-              if(manualFields.isNotEmpty)...[
-                Container(
-                  width:double.infinity,
-                  padding:const EdgeInsets.all(10),
-                  decoration:BoxDecoration(color:Colors.orange.withValues(alpha:.12),borderRadius:BorderRadius.circular(10)),
-                  child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                    const Text('Manual-only protected questions',style:TextStyle(fontWeight:FontWeight.bold)),
-                    const SizedBox(height:4),
-                    const Text('Career Atlas will not infer, save, or auto-fill protected demographic answers.'),
-                    ...manualFields.map((field)=>Padding(
-                      padding:const EdgeInsets.only(top:6),
-                      child:Text('• ${field['label']}'),
-                    )),
-                  ]),
-                ),
-                const SizedBox(height:10),
-              ],
             ])),
           ),
           actions:[
             TextButton(onPressed:sending?null:()=>Navigator.pop(dialogContext),child:const Text('Cancel')),
-            if(manualFields.isNotEmpty)
-              OutlinedButton(
-                onPressed:()=>open((payload['officialForm']??'').toString()),
-                child:const Text('Open official form ↗'),
-              ),
-            if(safeFields.isNotEmpty)
-              FilledButton.icon(
-                onPressed:sending?null:()async{
-                  final answers=safeFields.map((field)=>({
-                    'field_id':field['id'],
-                    'answer':controllers[field['id'] as int]!.text.trim(),
-                  })).toList();
-                  if(answers.any((x)=>(x['answer'] as String).isEmpty)){
-                    message('Please answer each listed non-sensitive review question.');return;
+            FilledButton.icon(
+              onPressed:sending?null:()async{
+                final answers=fields.map((field)=>({
+                  'field_id':field['id'],
+                  'answer':controllers[field['id'] as int]!.text.trim(),
+                })).toList();
+                if(answers.any((x)=>(x['answer'] as String).isEmpty)){
+                  message('Please answer each missing field shown here.');return;
+                }
+                setLocal(()=>sending=true);
+                try{
+                  final result=await api.request('POST','v3/applications/${application['id']}/review-submit',{'answers':answers});
+                  final status=(result['status']??'').toString();
+                  if(status=='retry_started'){
+                    if(dialogContext.mounted)Navigator.pop(dialogContext);
+                    message('Saved. LangGraph is refilling the complete form and retrying; you do not need to fill the employer form again.');
+                    await reload();
+                    Future.delayed(const Duration(seconds:20),(){if(mounted)reload();});
+                  }else{
+                    final missing=(result['missing'] as List? ?? []);
+                    message(missing.isEmpty?'Answers saved for the next automatic retry.':'Still missing: ${missing.join(' · ')}');
                   }
-                  setLocal(()=>sending=true);
-                  try{
-                    final result=await api.request('POST','v3/applications/${application['id']}/review-submit',{'answers':answers});
-                    if(result['status']=='retry_started'){
-                      if(dialogContext.mounted)Navigator.pop(dialogContext);
-                      message('Answers saved. LangGraph is refilling the full form and retrying submission now.');
-                      await reload();
-                      Future.delayed(const Duration(seconds:20),(){if(mounted)reload();});
-                    }else if(result['status']=='manual_required'){
-                      message('Safe answers saved. This employer still requires protected questions on its official form.');
-                    }else{
-                      message((result['missing'] as List?)?.join(' · ') ?? 'More information is still required.');
-                    }
-                  }catch(e){message('$e');}
-                  finally{if(dialogContext.mounted)setLocal(()=>sending=false);}
-                },
-                icon:const Icon(Icons.auto_awesome),
-                label:Text(sending?'Starting agent…':'Save & let agent finish'),
-              ),
+                }catch(e){message('$e');}
+                finally{if(dialogContext.mounted)setLocal(()=>sending=false);}
+              },
+              icon:sending?const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2)):const Icon(Icons.auto_awesome),
+              label:Text(sending?'Starting agent…':'Save answers & let agent finish'),
+            ),
           ],
         );
       }));
