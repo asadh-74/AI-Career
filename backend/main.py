@@ -99,7 +99,7 @@ class Profile(BaseModel):
     email: str = ''
     phone: str = ''
 class PrepareIn(BaseModel): job_id: int; document_kind: str = 'Resume'
-class ConfirmIn(BaseModel): receipt: str = Field(min_length=1, max_length=1000)
+class ConfirmIn(BaseModel): receipt: str = Field(default='', max_length=1000)
 class TrackIn(BaseModel):
     job_id: int
     status: str
@@ -222,10 +222,35 @@ def job_statuses(session:Session=Depends(db)):
 @app.post('/api/job-statuses', dependencies=[Depends(auth)])
 def track_job(body:TrackIn,session:Session=Depends(db)):
     if body.status not in ('submitted','not_submitted'):raise HTTPException(400,'Choose submitted or not_submitted')
-    if not session.get(Job,body.job_id):raise HTTPException(404,'Job not found')
+    job=session.get(Job,body.job_id)
+    if not job:raise HTTPException(404,'Job not found')
     item=session.scalar(select(JobStatus).where(JobStatus.job_id==body.job_id))
     if not item:item=JobStatus(job_id=body.job_id,status=body.status);session.add(item)
-    item.status=body.status;item.note=body.note.strip();item.updated_at=datetime.now(timezone.utc)
+    note=(body.note or '').strip()
+    if body.status=='submitted' and not note:
+        note='Manual submission confirmed by user'
+    item.status=body.status;item.note=note;item.updated_at=datetime.now(timezone.utc)
+
+    application=session.scalar(select(Application).where(Application.job_id==body.job_id))
+    if body.status=='submitted':
+        if not application:
+            doc=session.scalar(select(Document).where(Document.kind=='Resume')) or session.scalar(select(Document).where(Document.kind=='CV'))
+            if not doc: raise HTTPException(400,'Upload a Resume or CV first')
+            application=Application(
+                job_id=job.id,document_id=doc.id,score=0,
+                rationale='Manually submitted outside Career Atlas.',
+                draft='',status='applied',receipt=note,
+            )
+            session.add(application);session.flush()
+        else:
+            application.status='applied'
+            application.receipt=note
+        record_event(session,job.id,'submitted','manual_confirmation',note,application_id=application.id)
+    elif application and application.status=='applied':
+        application.status='ready_for_review'
+        application.receipt=note or 'Manual submitted status was undone by user.'
+        record_event(session,job.id,'prepared','manual_submission_undone',application.receipt,application_id=application.id)
+
     session.commit();session.refresh(item);return status_out(item)
 
 @app.post('/api/documents', dependencies=[Depends(auth)])
@@ -386,10 +411,12 @@ def submitted_applications(session:Session=Depends(db)):
 def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
     item=session.get(Application,application_id)
     if not item:raise HTTPException(404,'Application not found')
-    item.status='applied';item.receipt=body.receipt
+    receipt=(body.receipt or '').strip() or 'Manual submission confirmed by user'
+    item.status='applied';item.receipt=receipt
     status=session.scalar(select(JobStatus).where(JobStatus.job_id==item.job_id))
     if not status:status=JobStatus(job_id=item.job_id,status='submitted');session.add(status)
-    status.status='submitted';status.note=body.receipt;status.updated_at=datetime.now(timezone.utc)
+    status.status='submitted';status.note=receipt;status.updated_at=datetime.now(timezone.utc)
+    record_event(session,item.job_id,'submitted','manual_confirmation',receipt,application_id=item.id)
     session.commit();return app_out(item)
 @app.post('/api/applications/{application_id}/submit', dependencies=[Depends(auth)])
 def submit(application_id:int,session:Session=Depends(db)):
