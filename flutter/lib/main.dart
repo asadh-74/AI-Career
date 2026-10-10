@@ -223,12 +223,12 @@ class _WorkspaceState extends State<Workspace> {
         message('No answer is needed from you. This is an agent/form-adapter issue, so do not refill the whole form manually.');
         return;
       }
-      final nonSensitive=fields.where((field)=>field['sensitive']!=true).toList();
-      final sensitive=fields.where((field)=>field['sensitive']==true).toList();
+
       final controllers=<int,TextEditingController>{};
-      for(final field in nonSensitive){
+      for(final field in fields){
         controllers[field['id'] as int]=TextEditingController(text:(field['answer']??'').toString());
       }
+
       if(!mounted)return;
       await showDialog(context:context,builder:(dialogContext)=>StatefulBuilder(builder:(dialogContext,setLocal){
         bool sending=false;
@@ -237,78 +237,77 @@ class _WorkspaceState extends State<Workspace> {
           content:SizedBox(
             width:640,
             child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-              const Text('Career Atlas will refill your name, email, phone, links, education, tailored résumé and every other known field automatically. You only answer unresolved non-sensitive items.'),
+              const Text(
+                'Career Atlas will refill your name, email, phone, links, education, tailored résumé and every other known field automatically. You only answer the unresolved items below.'
+              ),
               const SizedBox(height:12),
-              ...nonSensitive.map((field)=>Padding(
+              ...fields.map((field)=>Padding(
                 padding:const EdgeInsets.only(bottom:14),
                 child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
                   Text(field['label']??'',style:const TextStyle(fontWeight:FontWeight.w600)),
+                  if(field['sensitive']==true)Padding(
+                    padding:const EdgeInsets.only(top:4,bottom:6),
+                    child:Text(
+                      'Protected/personal question — only you can provide this answer. Career Atlas will use it only for this application, will not infer it, and will not reuse it for other applications.',
+                      style:TextStyle(color:Colors.orange.shade800,fontSize:12),
+                    ),
+                  ),
                   const SizedBox(height:5),
                   TextField(
                     controller:controllers[field['id'] as int],
                     minLines:1,
-                    maxLines:4,
-                    decoration:const InputDecoration(
-                      hintText:'Your answer',
-                      border:OutlineInputBorder(),
+                    maxLines:3,
+                    decoration:InputDecoration(
+                      hintText:field['sensitive']==true?'Enter your answer exactly as you want it submitted':'Your answer',
+                      border:const OutlineInputBorder(),
                     ),
                   ),
                 ]),
               )),
-              if(sensitive.isNotEmpty)...[
-                Card(
-                  child:Padding(
-                    padding:const EdgeInsets.all(12),
-                    child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                      const Row(children:[
-                        Icon(Icons.lock_outline,size:18),
-                        SizedBox(width:6),
-                        Text('Protected employer question',style:TextStyle(fontWeight:FontWeight.bold)),
-                      ]),
-                      const SizedBox(height:6),
-                      ...sensitive.map((field)=>Padding(
-                        padding:const EdgeInsets.only(bottom:5),
-                        child:Text('• ${field['label']??''}'),
-                      )),
-                      const Text('Career Atlas does not infer or auto-fill protected demographic information. If the employer requires it, this application remains manual-only.'),
-                    ]),
-                  ),
-                ),
-              ],
             ])),
           ),
           actions:[
             TextButton(onPressed:sending?null:()=>Navigator.pop(dialogContext),child:const Text('Cancel')),
-            if(nonSensitive.isNotEmpty)
-              FilledButton.icon(
-                onPressed:sending?null:()async{
-                  final answers=nonSensitive.map((field)=>({
-                    'field_id':field['id'],
-                    'answer':controllers[field['id'] as int]!.text.trim(),
-                  })).toList();
-                  if(answers.any((x)=>(x['answer'] as String).isEmpty)){
-                    message('Please answer each listed missing field.');return;
+            FilledButton.icon(
+              onPressed:sending?null:()async{
+                final answers=fields.map((field)=>({
+                  'field_id':field['id'],
+                  'answer':controllers[field['id'] as int]!.text.trim(),
+                })).toList();
+                if(answers.any((x)=>(x['answer'] as String).isEmpty)){
+                  message('Please answer each missing field shown here.');
+                  return;
+                }
+                setLocal(()=>sending=true);
+                try{
+                  final result=await api.request(
+                    'POST',
+                    'v3/applications/${application['id']}/review-submit',
+                    {'answers':answers},
+                  );
+                  final status=(result['status']??'').toString();
+                  if(status=='retry_started'){
+                    if(dialogContext.mounted)Navigator.pop(dialogContext);
+                    message('Saved. LangGraph is refilling the complete form and retrying now. You do not need to reopen the employer form.');
+                    await reload();
+                    Future.delayed(const Duration(seconds:20),(){if(mounted)reload();});
+                  }else{
+                    final missing=(result['missing'] as List? ?? []);
+                    message(missing.isEmpty
+                      ? (result['message']??'Answers saved for the automatic retry.').toString()
+                      : 'Still missing: ${missing.join(' · ')}');
                   }
-                  setLocal(()=>sending=true);
-                  try{
-                    final result=await api.request('POST','v3/applications/${application['id']}/review-submit',{'answers':answers});
-                    final status=(result['status']??'').toString();
-                    if(status=='retry_started'){
-                      if(dialogContext.mounted)Navigator.pop(dialogContext);
-                      message('Answer saved. LangGraph is refilling the complete form and retrying submission now.');
-                      await reload();
-                      Future.delayed(const Duration(seconds:20),(){if(mounted)reload();});
-                    }else if(status=='manual_required'){
-                      message('This employer requires a protected field, so Career Atlas will not auto-submit this application.');
-                    }else{
-                      message((result['missing'] as List?)?.join(' · ') ?? 'More information is still required.');
-                    }
-                  }catch(e){message('$e');}
-                  finally{if(dialogContext.mounted)setLocal(()=>sending=false);}
-                },
-                icon:const Icon(Icons.auto_awesome),
-                label:Text(sending?'Starting agent…':'Save & let agent finish'),
-              ),
+                }catch(e){
+                  message('$e');
+                }finally{
+                  if(dialogContext.mounted)setLocal(()=>sending=false);
+                }
+              },
+              icon:sending
+                ? const SizedBox(width:16,height:16,child:CircularProgressIndicator(strokeWidth:2))
+                : const Icon(Icons.auto_awesome),
+              label:Text(sending?'Starting agent…':'Save answers & let agent finish'),
+            ),
           ],
         );
       }));
