@@ -509,7 +509,7 @@ def run(target_job_id_override=None):
         # questions jump to the front of the next LangGraph run.
         retry_jobs=session.scalars(
             select(Job).join(Application,Application.job_id==Job.id)
-            .where(Application.status=="retry_ready")
+            .where(Application.status=="ready_for_retry")
             .order_by(Application.created_at.asc())
         ).all()
         if retry_jobs:
