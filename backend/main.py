@@ -100,6 +100,8 @@ class Profile(BaseModel):
     phone: str = ''
 class PrepareIn(BaseModel): job_id: int; document_kind: str = 'Resume'
 class ConfirmIn(BaseModel): receipt: str = Field(default='', max_length=1000)
+class LocateApplicationIn(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
 class TrackIn(BaseModel):
     job_id: int
     status: str
@@ -385,6 +387,293 @@ def applications(session:Session=Depends(db)):
         if changed:
             session.commit()
     return [app_out(x) for x in items]
+
+@app.post('/api/applications/locate', dependencies=[Depends(auth)])
+def locate_application(body:LocateApplicationIn,session:Session=Depends(db)):
+    raw=(body.url or '').strip()
+    parsed=urlparse(raw)
+    if parsed.scheme not in ('http','https') or not parsed.hostname:
+        raise HTTPException(400,'Paste a valid employer application or confirmation URL')
+
+    # Greenhouse and several ATS products append /confirmation to the original
+    # job URL after a successful manual submission.
+    clean_path=re.sub(r'/confirmation/?    rows=session.execute(
+        select(Application,Job,JobStatus)
+        .join(Job,Job.id==Application.job_id)
+        .join(JobStatus,JobStatus.job_id==Application.job_id)
+        .where(Application.status=="applied",JobStatus.status=="submitted")
+        .order_by(JobStatus.updated_at.desc())
+    ).all()
+    return [{
+        "applicationId":a.id,
+        "jobId":j.id,
+        "company":j.company,
+        "title":j.title,
+        "location":j.location,
+        "provider":j.provider,
+        "applyUrl":j.apply_url,
+        "score":a.score,
+        "receipt":a.receipt or s.note,
+        "submittedAt":s.updated_at.isoformat(),
+    } for a,j,s in rows]
+@app.post('/api/applications/{application_id}/confirm', dependencies=[Depends(auth)])
+def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
+    item=session.get(Application,application_id)
+    if not item:raise HTTPException(404,'Application not found')
+    receipt=(body.receipt or '').strip() or 'Manual submission confirmed by user'
+    item.status='applied';item.receipt=receipt
+    status=session.scalar(select(JobStatus).where(JobStatus.job_id==item.job_id))
+    if not status:status=JobStatus(job_id=item.job_id,status='submitted');session.add(status)
+    status.status='submitted';status.note=receipt;status.updated_at=datetime.now(timezone.utc)
+    record_event(session,item.job_id,'submitted','manual_confirmation',receipt,application_id=item.id)
+    session.commit();return app_out(item)
+@app.post('/api/applications/{application_id}/submit', dependencies=[Depends(auth)])
+def submit(application_id:int,session:Session=Depends(db)):
+    item=session.get(Application,application_id)
+    if not item:raise HTTPException(404,'Application not found')
+    job=session.get(Job,item.job_id)
+    return {'status':'needs_human','reason':'This employer does not provide applicant-side API access. Open the official form, review its questions, and submit there. Record the confirmation afterward.','applyUrl':job.apply_url}
+
+
+@app.get('/api/automation/config', dependencies=[Depends(auth)])
+def automation_config():
+    from automation import AutomationConfig
+    cfg=AutomationConfig.from_env()
+    return {
+        'enabled':cfg.enabled,
+        'minMatchScore':cfg.min_match_score,
+        'dailyLimit':cfg.daily_limit,
+        'remoteOnly':cfg.remote_only,
+        'allowEmail':cfg.allow_email,
+        'allowBrowser':cfg.allow_browser,
+        'allowIndeed':cfg.allow_indeed,
+        'allowGlassdoor':cfg.allow_glassdoor,
+        'autoSubmitBrowser':cfg.auto_submit_browser,
+    }
+
+@app.post('/api/automation/run', dependencies=[Depends(auth)])
+def automation_run():
+    from worker import run
+    return run()
+
+class QualityModeIn(BaseModel):
+    mode: str
+
+class StageIn(BaseModel):
+    stage: str
+    note: str = Field(default='', max_length=1500)
+
+class EmployerMessageIn(BaseModel):
+    application_id: int | None = None
+    sender: str = ''
+    subject: str = ''
+    body: str = ''
+    classification: str = 'other'
+    action_required: bool = False
+
+class QuestionMemoryIn(BaseModel):
+    answer_key: str = Field(default='', max_length=120)
+    selector_hint: str = Field(default='', max_length=400)
+
+@app.get('/api/v3/dashboard', dependencies=[Depends(auth)])
+def v3_dashboard(session:Session=Depends(db)):
+    statuses=session.scalars(select(JobStatus)).all()
+    apps=session.scalars(select(Application)).all()
+    metrics=session.scalars(select(JobMetric)).all()
+    events=session.scalars(select(ApplicationEvent).order_by(ApplicationEvent.created_at.desc()).limit(80)).all()
+    submitted=sum(1 for s in statuses if s.status=='submitted')
+    needs=sum(1 for a in apps if a.status=='needs_human')
+    failed=sum(1 for a in apps if a.status=='failed')
+    avg=round(sum(m.probability for m in metrics)/max(1,len(metrics))) if metrics else 0
+    stages={}
+    latest={}
+    for e in events:
+        key=e.application_id if e.application_id is not None else f"job:{e.job_id}"
+        if key not in latest:
+            latest[key]=e.stage
+    for stage in latest.values():
+        stages[stage]=stages.get(stage,0)+1
+    return {
+        'jobs':session.query(Job).count(),
+        'applications':len(apps),
+        'submitted':submitted,
+        'needsAttention':needs,
+        'failed':failed,
+        'averageProbability':avg,
+        'qualityMode':get_setting(session,'quality_mode','balanced'),
+        'threshold':quality_threshold(session,75),
+        'stageCounts':stages,
+        'recentEvents':[{
+            'id':e.id,'jobId':e.job_id,'applicationId':e.application_id,
+            'stage':e.stage,'type':e.event_type,'message':e.message,
+            'createdAt':e.created_at.isoformat()
+        } for e in events[:30]],
+    }
+
+@app.get('/api/v3/metrics', dependencies=[Depends(auth)])
+def v3_metrics(session:Session=Depends(db)):
+    rows=session.execute(select(JobMetric,Job).join(Job,Job.id==JobMetric.job_id).order_by(JobMetric.probability.desc()).limit(200)).all()
+    return [{
+        'jobId':j.id,'company':j.company,'title':j.title,'category':m.category,
+        'technical':m.technical,'experience':m.experience,'location':m.location,
+        'seniority':m.seniority,'education':m.education,'salary':m.salary,
+        'difficulty':m.difficulty,'probability':m.probability,'fingerprint':m.fingerprint,
+        'updatedAt':m.updated_at.isoformat()
+    } for m,j in rows]
+
+@app.get('/api/v3/events', dependencies=[Depends(auth)])
+def v3_events(session:Session=Depends(db),limit:int=100):
+    rows=session.scalars(select(ApplicationEvent).order_by(ApplicationEvent.created_at.desc()).limit(min(max(limit,1),300))).all()
+    return [{
+        'id':e.id,'applicationId':e.application_id,'jobId':e.job_id,'stage':e.stage,
+        'type':e.event_type,'message':e.message,'meta':e.meta_json,'createdAt':e.created_at.isoformat()
+    } for e in rows]
+
+@app.post('/api/v3/applications/{application_id}/stage', dependencies=[Depends(auth)])
+def v3_set_stage(application_id:int,body:StageIn,session:Session=Depends(db)):
+    item=session.get(Application,application_id)
+    if not item: raise HTTPException(404,'Application not found')
+    allowed={'discovered','matched','prepared','applying','submitted','employer_viewed','interview','rejected','offer'}
+    if body.stage not in allowed: raise HTTPException(400,'Invalid stage')
+    record_event(session,item.job_id,body.stage,'manual_stage',body.note,application_id=item.id)
+    session.commit()
+    return {'ok':True,'stage':body.stage}
+
+@app.get('/api/v3/questions', dependencies=[Depends(auth)])
+def v3_questions(session:Session=Depends(db)):
+    rows=session.scalars(select(QuestionMemory).order_by(QuestionMemory.last_seen_at.desc()).limit(300)).all()
+    return [{
+        'id':x.id,'host':x.host,'label':x.label_key,'answerKey':x.answer_key,
+        'selectorHint':x.selector_hint,'sensitive':x.sensitive,'successCount':x.success_count,
+        'lastSeenAt':x.last_seen_at.isoformat()
+    } for x in rows]
+
+@app.post('/api/v3/questions/{question_id}', dependencies=[Depends(auth)])
+def v3_update_question(question_id:int,body:QuestionMemoryIn,session:Session=Depends(db)):
+    item=session.get(QuestionMemory,question_id)
+    if not item: raise HTTPException(404,'Question memory not found')
+    if item.sensitive and body.answer_key:
+        raise HTTPException(400,'Sensitive questions cannot use normal profile memory')
+    allowed={'','name','email','phone','location','linkedin','github','portfolio','availability','salary','work_authorized','requires_sponsorship'}
+    if body.answer_key not in allowed: raise HTTPException(400,'Unsupported profile key')
+    item.answer_key=body.answer_key
+    if body.selector_hint.strip(): item.selector_hint=body.selector_hint.strip()
+    item.last_seen_at=datetime.now(timezone.utc)
+    session.commit()
+    return {'id':item.id,'answerKey':item.answer_key,'sensitive':item.sensitive}
+
+@app.get('/api/v3/resume-variants', dependencies=[Depends(auth)])
+def v3_resume_variants(session:Session=Depends(db)):
+    rows=session.execute(select(ResumeVariant,Job).join(Job,Job.id==ResumeVariant.job_id).order_by(ResumeVariant.created_at.desc()).limit(100)).all()
+    return [{
+        'id':v.id,'jobId':j.id,'company':j.company,'title':j.title,'filename':v.filename,
+        'strategy':v.strategy,'createdAt':v.created_at.isoformat()
+    } for v,j in rows]
+
+@app.get('/api/v3/artifacts/{application_id}', dependencies=[Depends(auth)])
+def v3_artifacts(application_id:int,session:Session=Depends(db)):
+    rows=session.scalars(select(ApplicationArtifact).where(ApplicationArtifact.application_id==application_id).order_by(ApplicationArtifact.created_at)).all()
+    return [{'id':x.id,'kind':x.kind,'contentType':x.content_type,'createdAt':x.created_at.isoformat()} for x in rows]
+
+@app.get('/api/v3/artifacts/file/{artifact_id}', dependencies=[Depends(auth)])
+def v3_artifact_file(artifact_id:int,session:Session=Depends(db)):
+    from fastapi.responses import Response
+    item=session.get(ApplicationArtifact,artifact_id)
+    if not item: raise HTTPException(404,'Artifact not found')
+    return Response(content=item.data,media_type=item.content_type)
+
+@app.get('/api/v3/settings', dependencies=[Depends(auth)])
+def v3_settings(session:Session=Depends(db)):
+    mode=get_setting(session,'quality_mode','balanced')
+    return {'qualityMode':mode,'threshold':quality_threshold(session,75)}
+
+@app.post('/api/v3/settings/quality', dependencies=[Depends(auth)])
+def v3_quality(body:QualityModeIn,session:Session=Depends(db)):
+    mode=body.mode.lower().strip()
+    if mode not in ('conservative','balanced','aggressive'): raise HTTPException(400,'Use conservative, balanced, or aggressive')
+    set_setting(session,'quality_mode',mode);session.commit()
+    return {'qualityMode':mode,'threshold':quality_threshold(session,75)}
+
+@app.get('/api/v3/messages', dependencies=[Depends(auth)])
+def v3_messages(session:Session=Depends(db)):
+    rows=session.scalars(select(EmployerMessage).order_by(EmployerMessage.received_at.desc()).limit(200)).all()
+    return [{
+        'id':x.id,'applicationId':x.application_id,'sender':x.sender,'subject':x.subject,
+        'body':x.body,'classification':x.classification,'actionRequired':x.action_required,
+        'receivedAt':x.received_at.isoformat()
+    } for x in rows]
+
+@app.post('/api/v3/messages', dependencies=[Depends(auth)])
+def v3_add_message(body:EmployerMessageIn,session:Session=Depends(db)):
+    item=EmployerMessage(application_id=body.application_id,sender=body.sender[:320],subject=body.subject[:500],body=body.body[:12000],classification=body.classification[:60],action_required=body.action_required)
+    session.add(item)
+    if body.application_id:
+        app_item=session.get(Application,body.application_id)
+        if app_item:
+            stage='interview' if body.classification=='interview' else ('rejected' if body.classification=='rejection' else 'employer_viewed')
+            record_event(session,app_item.job_id,stage,'employer_message',body.subject,application_id=app_item.id)
+    session.commit();session.refresh(item)
+    return {'id':item.id}
+
+@app.get('/api/v3/followups', dependencies=[Depends(auth)])
+def v3_followups(session:Session=Depends(db)):
+    rows=session.execute(select(FollowUpDraft,Application,Job).join(Application,Application.id==FollowUpDraft.application_id).join(Job,Job.id==Application.job_id).order_by(FollowUpDraft.due_at)).all()
+    return [{
+        'id':d.id,'applicationId':a.id,'company':j.company,'title':j.title,'message':d.message,
+        'status':d.status,'dueAt':d.due_at.isoformat() if d.due_at else None
+    } for d,a,j in rows]
+
+@app.get('/api/v3/interview-prep/{application_id}', dependencies=[Depends(auth)])
+def v3_interview_prep(application_id:int,session:Session=Depends(db)):
+    row=session.scalar(select(InterviewPrep).where(InterviewPrep.application_id==application_id))
+    return {'applicationId':application_id,'content':row.content if row else ''}
+
+@app.get('/api/v3/research', dependencies=[Depends(auth)])
+def v3_research(session:Session=Depends(db)):
+    rows=session.execute(select(ResearchResult,Job).join(Job,Job.id==ResearchResult.job_id).order_by(ResearchResult.quality_score.desc()).limit(150)).all()
+    return [{
+        'jobId':j.id,'company':j.company,'title':j.title,'companySummary':r.company_summary,
+        'eligibilityNotes':r.eligibility_notes,'qualityScore':r.quality_score,'source':r.source
+    } for r,j in rows]
+
+
+WEB=Path(__file__).parent/'web'
+if WEB.exists():
+    app.mount('/assets',StaticFiles(directory=WEB/'assets'),name='assets')
+    @app.get('/{path:path}',include_in_schema=False)
+    def flutter_page(path:str):
+        file=WEB/path
+        if file.is_file() and WEB.resolve() in file.resolve().parents:return FileResponse(file)
+        return FileResponse(WEB/'index.html')
+,'',parsed.path.rstrip('/'),flags=re.I)
+    clean=f'{parsed.scheme}://{parsed.netloc}{clean_path}'
+    candidates=session.scalars(select(Job)).all()
+    matched=None
+    for job in candidates:
+        for candidate in (job.apply_url,job.url):
+            if not candidate:continue
+            cp=urlparse(candidate)
+            cpath=cp.path.rstrip('/')
+            canonical=f'{cp.scheme}://{cp.netloc}{cpath}'
+            if canonical==clean:
+                matched=job;break
+            # Fallback for ATS URLs where the stable numeric/UUID posting ID is
+            # embedded in a longer path.
+            ids=re.findall(r'[A-Za-z0-9_-]{8,}',clean_path)
+            if ids and any(token in cpath for token in ids[-3:]):
+                if (cp.hostname or '').lower()==(parsed.hostname or '').lower():
+                    matched=job;break
+        if matched:break
+    if not matched:
+        raise HTTPException(404,'No Career Atlas job matches that confirmation URL')
+
+    application=session.scalar(select(Application).where(Application.job_id==matched.id))
+    return {
+        'job':job_out(matched),
+        'application':app_out(application) if application else None,
+        'cleanUrl':clean,
+        'matchedBy':'confirmation_url',
+    }
 
 @app.get('/api/applications/submitted', dependencies=[Depends(auth)])
 def submitted_applications(session:Session=Depends(db)):
