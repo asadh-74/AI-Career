@@ -78,6 +78,7 @@ class _WorkspaceState extends State<Workspace> {
   List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
   Map<String,dynamic> dashboard={};
   String query='', statusFilter='all', qualityMode='balanced';
+  bool reviewOnly=false;
   @override void initState(){super.initState();reload();}
   Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
@@ -254,29 +255,63 @@ class _WorkspaceState extends State<Workspace> {
       ])));
     }))
   ]);
-  Widget applicationsView()=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Text('Applications',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:8),
-    Text('${jobStatuses.where((s)=>s['status']=='submitted').length} submitted · ${jobs.length-jobStatuses.where((s)=>s['status']=='submitted' && jobs.any((j)=>j['id']==s['jobId'])).length} not submitted'),
-    const Text('Use Mark submitted on a job after you submit its official form. You can record earlier applications too.'),const SizedBox(height:12),
-    Expanded(child:ListView(children:[
-      ...jobStatuses.where((s)=>s['status']=='submitted').map((status){
-        final related=jobs.where((j)=>j['id']==status['jobId']).toList();
-        final j=related.isEmpty?null:related.first;
-        return Card(child:ListTile(title:Text(j?['title']??'Job #${status['jobId']}'),subtitle:Text('${j?['company']??''} · Submitted'),trailing:j==null?null:TextButton(onPressed:()=>markStatus(j,'not_submitted'),child:const Text('Undo'))));
-      }),
-      if(applications.isNotEmpty)Padding(padding:const EdgeInsets.symmetric(vertical:10),child:Text('AI drafts',style:Theme.of(context).textTheme.titleMedium)),
-      ...applications.map((item){
-        final a=item as Map;final related=jobs.where((j)=>j['id']==a['jobId']).toList();final job=related.isEmpty?null:related.first;
-        return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-          Text(job?['title']??'Job #${a['jobId']}',style:Theme.of(context).textTheme.titleMedium),
-          Text('Score ${a['score']} · ${statusFor(a['jobId'] as int)=='submitted'?'Submitted':'Not submitted'}'),
-          const SizedBox(height:6),Text(a['rationale']??''),
-          ExpansionTile(title:const Text('Read application draft'),children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(a['draft']??''))]),
-          OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
-        ])));
-      }),
-    ]))
-  ]);
+  Widget applicationsView(){
+    final reviewApps=applications.where((x)=>(x as Map)['status']=='needs_human').toList();
+    final visible=reviewOnly?reviewApps:applications;
+    return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Row(children:[
+        Expanded(child:Text('Applications',style:Theme.of(context).textTheme.headlineSmall)),
+        if(reviewOnly)Chip(label:Text('${reviewApps.length} need review'))
+      ]),
+      const SizedBox(height:8),
+      Text('${jobStatuses.where((s)=>s['status']=='submitted').length} confirmed submitted · ${reviewApps.length} need review · ${applications.length} application records'),
+      const SizedBox(height:8),
+      Wrap(spacing:8,children:[
+        ChoiceChip(label:Text('All (${applications.length})'),selected:!reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=false)),
+        ChoiceChip(label:Text('Needs review (${reviewApps.length})'),selected:reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=true)),
+      ]),
+      const SizedBox(height:10),
+      Expanded(child:visible.isEmpty
+        ? Center(child:Text(reviewOnly?'No applications currently need review.':'No application records yet.'))
+        : ListView(children:[
+          ...visible.map((item){
+            final a=item as Map;
+            final related=jobs.where((j)=>j['id']==a['jobId']).toList();
+            final job=related.isEmpty?null:related.first as Map?;
+            final needs=a['status']=='needs_human';
+            final receipt=(a['receipt']??'').toString();
+            final submitted=statusFor(a['jobId'] as int)=='submitted';
+            return Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+              Row(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                Expanded(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  Text(job?['title']??'Job #${a['jobId']}',style:Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight:FontWeight.bold)),
+                  Text('${job?['company']??''} · ${job?['provider']??''}'),
+                ])),
+                Chip(label:Text(needs?'Needs review':(submitted?'Submitted':(a['status']??'Prepared').toString().replaceAll('_',' '))))
+              ]),
+              Text('Match score: ${a['score']}'),
+              if(needs && receipt.isNotEmpty)Container(
+                width:double.infinity,
+                margin:const EdgeInsets.only(top:8,bottom:8),
+                padding:const EdgeInsets.all(10),
+                decoration:BoxDecoration(color:Colors.amber.withValues(alpha:.12),borderRadius:BorderRadius.circular(10)),
+                child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                  const Text('Why review is needed',style:TextStyle(fontWeight:FontWeight.bold)),
+                  const SizedBox(height:4),
+                  SelectableText(receipt),
+                ]),
+              ),
+              if((a['rationale']??'').toString().isNotEmpty)Text(a['rationale']??''),
+              if((a['draft']??'').toString().isNotEmpty)ExpansionTile(title:const Text('Read application draft'),children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(a['draft']??''))]),
+              Wrap(spacing:8,runSpacing:8,children:[
+                OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
+                if(needs)FilledButton.tonal(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Review & finish')),
+              ]),
+            ])));
+          }),
+        ]))
+    ]);
+  }
   Widget submittedView()=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Row(children:[
       Expanded(child:Text('Submitted Applications',style:Theme.of(context).textTheme.headlineSmall)),
@@ -307,9 +342,13 @@ class _WorkspaceState extends State<Workspace> {
           ])));
         }))
   ]);
-  Widget _statCard(String label,Object? value,IconData icon)=>SizedBox(width:170,child:Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-    Icon(icon,color:violet),const SizedBox(height:8),Text('${value??0}',style:Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight:FontWeight.bold)),Text(label)
-  ]))));
+  Widget _statCard(String label,Object? value,IconData icon,{VoidCallback? onTap})=>SizedBox(width:170,child:Card(child:InkWell(
+    borderRadius:BorderRadius.circular(12),onTap:onTap,
+    child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Icon(icon,color:violet),const SizedBox(height:8),Text('${value??0}',style:Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight:FontWeight.bold)),
+      Row(children:[Expanded(child:Text(label)),if(onTap!=null)const Icon(Icons.chevron_right,size:18)])
+    ]))
+  )));
   Widget dashboardView()=>ListView(children:[
     Row(children:[Expanded(child:Text('Automation Dashboard',style:Theme.of(context).textTheme.headlineSmall)),Chip(label:Text('Threshold ${dashboard['threshold']??75}+'))]),
     const SizedBox(height:8),const Text('Live Career Atlas v3 pipeline: discovery, scoring, form automation, submission evidence and recruiter follow-up.'),
@@ -318,7 +357,7 @@ class _WorkspaceState extends State<Workspace> {
       _statCard('Jobs',dashboard['jobs'],Icons.work_outline),
       _statCard('Applications',dashboard['applications'],Icons.description_outlined),
       _statCard('Confirmed',dashboard['submitted'],Icons.check_circle_outline),
-      _statCard('Needs review',dashboard['needsAttention'],Icons.warning_amber_outlined),
+      _statCard('Needs review',dashboard['needsAttention'],Icons.warning_amber_outlined,onTap:()=>setState((){reviewOnly=true;tab=1;})),
       _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
     ]),
     const SizedBox(height:18),Text('Quality mode',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:7),
