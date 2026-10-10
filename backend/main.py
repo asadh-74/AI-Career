@@ -118,7 +118,11 @@ def db():
 
 def source_out(s): return dict(id=s.id, company=s.company, provider=s.provider, slug=s.slug, active=s.active)
 def job_out(j): return dict(id=j.id, company=j.company, title=j.title, location=j.location, url=j.url, applyUrl=j.apply_url, provider=j.provider, foundAt=j.found_at.isoformat())
-def app_out(a): return dict(id=a.id, jobId=a.job_id, documentId=a.document_id, score=a.score, rationale=a.rationale, draft=a.draft, status=a.status, receipt=a.receipt)
+def app_out(a,job=None):
+    out=dict(id=a.id, jobId=a.job_id, documentId=a.document_id, score=a.score, rationale=a.rationale, draft=a.draft, status=a.status, receipt=a.receipt)
+    if job is not None:
+        out.update(company=job.company,title=job.title,location=job.location,provider=job.provider,url=job.url,applyUrl=job.apply_url)
+    return out
 def status_out(s): return dict(jobId=s.job_id, status=s.status, note=s.note, updatedAt=s.updated_at.isoformat())
 
 @app.post('/api/auth/login')
@@ -371,12 +375,15 @@ def prepare(body:PrepareIn,session:Session=Depends(db)):
     session.add(item);session.commit();session.refresh(item);return app_out(item)
 @app.get('/api/applications', dependencies=[Depends(auth)])
 def applications(session:Session=Depends(db)):
-    items=session.scalars(select(Application).order_by(Application.created_at.desc())).all()
+    rows=session.execute(
+        select(Application,Job)
+        .join(Job,Job.id==Application.job_id)
+        .order_by(Application.created_at.desc())
+    ).all()
     if os.getenv('GEMINI_API_KEY'):
         changed=False
-        for item in items:
+        for item,job in rows:
             if (item.rationale or '').startswith('Local keyword estimate'):
-                job=session.get(Job,item.job_id)
                 doc=session.get(Document,item.document_id)
                 if job and doc:
                     score,rationale,draft=ai_prepare(job,doc)
@@ -386,7 +393,7 @@ def applications(session:Session=Depends(db)):
                     changed=True
         if changed:
             session.commit()
-    return [app_out(x) for x in items]
+    return [app_out(item,job) for item,job in rows]
 
 @app.post('/api/applications/locate', dependencies=[Depends(auth)])
 def locate_application(body:LocateApplicationIn,session:Session=Depends(db)):
