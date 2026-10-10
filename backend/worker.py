@@ -100,9 +100,11 @@ def direct_apply_priority(job)->int:
 def _profile_value(profile,key):
     aliases={
         "full_name":"name","name":"name","email":"email","phone":"phone","mobile":"phone",
-        "location":"location","city":"location","linkedin":"linkedin","github":"github","portfolio":"portfolio",
+        "location":"location","city":"city","country":"country","linkedin":"linkedin","github":"github","portfolio":"portfolio",
         "website":"portfolio","availability":"availability","salary":"salary_expectation_amount",
         "work_authorized":"work_authorized","requires_sponsorship":"requires_sponsorship",
+        "university":"university","degree":"degree","degree_name":"degree_name",
+        "field_of_study":"field_of_study","graduation_year":"graduation_year",
     }
     return profile.get(aliases.get(key,key),"")
 
@@ -131,7 +133,10 @@ def remember_blocker(session,job,reason):
             for token,key in (
                 ("full name","name"),("first name","name"),("email","email"),("phone","phone"),
                 ("linkedin","linkedin"),("github","github"),("portfolio","portfolio"),("website","portfolio"),
-                ("availability","availability"),("salary","salary"),("location","location"),("city","location"),
+                ("availability","availability"),("salary","salary"),("location","location"),("city","city"),
+                ("country","country"),("university","university"),("college","university"),("school","university"),
+                ("degree","degree"),("major","field_of_study"),("field of study","field_of_study"),
+                ("graduation year","graduation_year"),("expected graduation","graduation_year"),
             ):
                 if token in l:answer_key=key;break
             selector=""
