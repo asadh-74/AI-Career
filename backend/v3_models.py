@@ -57,6 +57,18 @@ class QuestionMemory(Base):
     last_seen_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
     __table_args__=(UniqueConstraint("host","label_key",name="uq_question_memory_host_label"),)
 
+class ReviewAnswer(Base):
+    __tablename__="review_answers"
+    id:Mapped[int]=mapped_column(primary_key=True)
+    application_id:Mapped[int]=mapped_column(ForeignKey("applications.id"),index=True)
+    label_key:Mapped[str]=mapped_column(String(500))
+    answer:Mapped[str]=mapped_column(Text,default="")
+    selector_hint:Mapped[str]=mapped_column(String(500),default="")
+    sensitive:Mapped[bool]=mapped_column(Boolean,default=False)
+    resolved:Mapped[bool]=mapped_column(Boolean,default=False)
+    updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    __table_args__=(UniqueConstraint("application_id","label_key",name="uq_review_answer_application_label"),)
+
 class ResumeVariant(Base):
     __tablename__="resume_variants"
     id:Mapped[int]=mapped_column(primary_key=True)
@@ -119,6 +131,40 @@ class ResearchResult(Base):
     quality_score:Mapped[int]=mapped_column(Integer,default=0)
     source:Mapped[str]=mapped_column(String(60),default="heuristic")
     created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+PROTECTED_REVIEW_TERMS=("gender","race","ethnicity","disability","veteran","religion","sexual orientation","marital status","pregnancy")
+
+def review_question_is_sensitive(label:str)->bool:
+    low=(label or "").lower()
+    return any(x in low for x in PROTECTED_REVIEW_TERMS)
+
+def extract_review_questions(reason:str)->list[dict]:
+    """Extract human-answerable questions from an automation blocker string."""
+    reason=(reason or "").strip()
+    if not reason:return []
+    chunks=[]
+    if "Invalid fields:" in reason:
+        tail=reason.split("Invalid fields:",1)[1]
+        chunks.extend(x.strip() for x in tail.split(" | ") if x.strip())
+    pattern=re.compile(r"(?:Sensitive/uncertain question:|Unknown required field:)\s*(.*?)(?=(?:\s*\|\s*)?(?:Sensitive/uncertain question:|Unknown required field:)|$)",re.I|re.S)
+    chunks.extend(m.group(1).strip(" |") for m in pattern.finditer(reason) if m.group(1).strip())
+    seen=set();out=[]
+    for raw in chunks:
+        text=re.sub(r"<[^>]+>"," ",raw)
+        text=re.sub(r"\s+"," ",text).strip()
+        if not text:continue
+        # Strip noisy whole-page prefixes from validation diagnostics.
+        for marker in ("LinkedIn Profile","Do you currently","What is your","Have you","Country","Phone","Email","First Name","Last Name"):
+            pos=text.find(marker)
+            if pos>0 and len(text)>220:
+                text=text[pos:]
+                break
+        text=text[:500]
+        key=normalize_text(text)
+        if not key or key in seen:continue
+        seen.add(key)
+        out.append({"label":text,"sensitive":review_question_is_sensitive(text)})
+    return out
 
 def normalize_text(v:str)->str:
     return re.sub(r"\s+"," ",re.sub(r"[^a-z0-9+#. ]+"," ",(v or "").lower())).strip()
