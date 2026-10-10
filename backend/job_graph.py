@@ -108,10 +108,20 @@ def _route_after_email(state: ApplicationState) -> str:
     return "stop" if state.get("route") == "done" else "browser"
 
 
+def _review_gate(state: ApplicationState) -> ApplicationState:
+    """Normalize browser blockers into an explicit LangGraph review state."""
+    result=state.get("result") or {}
+    if result.get("status")=="needs_human":
+        result={**result,"review_required":True}
+        return {**state,"route":"awaiting_review","result":result}
+    return {**state,"route":"done","result":result}
+
+
 _builder = StateGraph(ApplicationState)
 _builder.add_node("score_gate", _score_gate)
 _builder.add_node("email", _email_attempt)
 _builder.add_node("browser", _browser_attempt)
+_builder.add_node("review_gate", _review_gate)
 _builder.add_node("review_gate", _review_gate)
 _builder.set_entry_point("score_gate")
 _builder.add_conditional_edges(
