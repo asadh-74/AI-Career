@@ -58,7 +58,6 @@ def _email_attempt(state: ApplicationState) -> ApplicationState:
             "result": {"status": "applied", "receipt": receipt},
         }
     except Exception as exc:
-        # Email failure falls through to browser instead of ending the attempt.
         return {
             **state,
             "route": "browser",
@@ -81,24 +80,34 @@ def _browser_attempt(state: ApplicationState) -> ApplicationState:
         }
 
     draft = naturalize_draft(job, state.get("draft", ""))
-    result = apply_with_playwright(job.apply_url, doc.pdf, doc.filename, draft, state.get("learned_answers") or [])
+    result = apply_with_playwright(
+        job.apply_url,
+        doc.pdf,
+        doc.filename,
+        draft,
+        state.get("learned_answers") or [],
+    )
 
     if result.get("status") == "failed":
         fallback = apply_with_selenium(job.apply_url, doc.pdf, doc.filename, draft)
         if fallback.get("status") != "failed":
             result = fallback
 
-    return {**state, "route": "done", "result": result}
+    return {**state, "route": "review_gate", "result": result}
 
 
 def _review_gate(state: ApplicationState) -> ApplicationState:
-    result=state.get("result") or {}
-    if result.get("status")=="needs_human" and result.get("review_fields"):
-        return {**state,"route":"await_review","result":{**result,"graph_state":"awaiting_review"}}
-    return {**state,"route":"done"}
+    """Persist an explicit human-review state without losing browser progress."""
+    result = state.get("result") or {}
+    if result.get("status") == "needs_human":
+        result = {
+            **result,
+            "review_required": True,
+            "graph_state": "awaiting_review",
+        }
+        return {**state, "route": "awaiting_review", "result": result}
+    return {**state, "route": "done", "result": result}
 
-def _route_after_browser(state: ApplicationState) -> str:
-    return "review" if state.get("route")=="await_review" else "stop"
 
 def _route_after_score(state: ApplicationState) -> str:
     return "stop" if state.get("route") == "below_threshold" else "email"
@@ -108,20 +117,10 @@ def _route_after_email(state: ApplicationState) -> str:
     return "stop" if state.get("route") == "done" else "browser"
 
 
-def _review_gate(state: ApplicationState) -> ApplicationState:
-    """Normalize browser blockers into an explicit LangGraph review state."""
-    result=state.get("result") or {}
-    if result.get("status")=="needs_human":
-        result={**result,"review_required":True}
-        return {**state,"route":"awaiting_review","result":result}
-    return {**state,"route":"done","result":result}
-
-
 _builder = StateGraph(ApplicationState)
 _builder.add_node("score_gate", _score_gate)
 _builder.add_node("email", _email_attempt)
 _builder.add_node("browser", _browser_attempt)
-_builder.add_node("review_gate", _review_gate)
 _builder.add_node("review_gate", _review_gate)
 _builder.set_entry_point("score_gate")
 _builder.add_conditional_edges(
@@ -135,11 +134,7 @@ _builder.add_conditional_edges(
     {"stop": END, "browser": "browser"},
 )
 _builder.add_edge("browser", "review_gate")
-_builder.add_conditional_edges(
-    "review_gate",
-    _route_after_browser,
-    {"review": END, "stop": END},
-)
+_builder.add_edge("review_gate", END)
 APPLICATION_GRAPH = _builder.compile()
 
 
