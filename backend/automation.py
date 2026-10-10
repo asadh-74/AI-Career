@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from ats_adapters import ats_name, fill_ats_fields, application_root
 
-SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity",
+SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity","religion","religious",
 "assessment","test","captcha")
 LEGAL_JURISDICTION_TERMS=("united states","u.s.","usa","united kingdom","uk","european union","eu citizen","canada","australia")
 
@@ -392,6 +392,8 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
             except Exception:
                 required=False
             if not required and "*" not in text and "required" not in low:
+                # Optional protected/demographic questions are intentionally
+                # left unanswered; the rest of the application may continue.
                 continue
             blockers.append(f"Sensitive/uncertain question: {text[:180]}")
 
