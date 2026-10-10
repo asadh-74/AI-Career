@@ -21,8 +21,8 @@ from email_monitor import fetch_recent_messages, match_application
 from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION, build_canonical_resume_pdf
 from v3_models import (
     ApplicationArtifact, ApplicationEvent, EmployerMessage, FollowUpDraft,
-    InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant,
-    classify_failure, dimensional_scores, job_fingerprint, quality_threshold,
+    InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant, ReviewAnswer,
+    classify_failure, dimensional_scores, extract_review_questions, job_fingerprint, quality_threshold,
     record_event, strategy_select,
 )
 
@@ -145,6 +145,66 @@ def remember_blocker(session,job,reason):
             existing=QuestionMemory(host=host,label_key=label,answer_key=answer_key,selector_hint=selector,sensitive=sensitive)
             session.add(existing)
         existing.last_seen_at=datetime.now(timezone.utc)
+
+def review_answers_for(session,application_id):
+    rows=session.scalars(
+        select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.resolved==False,
+        )
+    ).all()
+    return [
+        {"label":row.label_key,"selector_hint":row.selector_hint,"value":row.answer,"sensitive":row.sensitive}
+        for row in rows if (row.answer or "").strip()
+    ]
+
+def store_review_fields(session,application_id,job,result):
+    # Mark old blockers resolved first; anything still blocking will be
+    # re-opened below. This keeps the dashboard focused on the current form.
+    old=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
+    for row in old: row.resolved=True
+
+    questions=result.get("review_fields") or extract_review_questions(result.get("reason",""))
+    created=0
+    for item in questions:
+        label=(item.get("label") or "").strip()[:500]
+        if not label:continue
+        sensitive=bool(item.get("sensitive"))
+        selector=(item.get("selector_hint") or "").strip()[:500]
+        row=session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.label_key==label,
+        ))
+        if not row:
+            row=ReviewAnswer(
+                application_id=application_id,label_key=label,selector_hint=selector,
+                sensitive=sensitive,resolved=False
+            )
+            session.add(row);created+=1
+        else:
+            row.selector_hint=selector or row.selector_hint
+            row.sensitive=sensitive
+            row.resolved=False
+        row.updated_at=datetime.now(timezone.utc)
+    session.flush()
+    return created
+
+def review_is_waiting_for_user(session,application_id):
+    rows=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application_id,
+        ReviewAnswer.resolved==False,
+    )).all()
+    return bool(rows) and any(not (r.answer or "").strip() for r in rows)
+
+def resolve_review_fields(session,application_id):
+    rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
+    for row in rows:
+        row.resolved=True
+        # Protected/demographic answers are one-application values. Do not
+        # retain them after a successful submission.
+        if row.sensitive:
+            row.answer=""
+        row.updated_at=datetime.now(timezone.utc)
 
 def count_learned_successes(session,job,result):
     used=((result.get("meta") or {}).get("learnedFields") or [])
@@ -331,7 +391,7 @@ def ensure_priority_sources(session):
     if added:session.commit()
     return added
 
-def run():
+def run(target_job_id_override=None):
     cfg=AutomationConfig.from_env()
     if not cfg.enabled:return {"status":"disabled","processed":0}
     stats={"status":"ok","sourcesScanned":0,"newJobs":0,"scanErrors":[],"publicSources":{},"jobsConsidered":0,
@@ -345,7 +405,7 @@ def run():
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
 
-        target_job_id=(os.getenv("TARGET_JOB_ID") or "").strip()
+        target_job_id=(str(target_job_id_override) if target_job_id_override is not None else (os.getenv("TARGET_JOB_ID") or "")).strip()
         target_job_url=(os.getenv("TARGET_JOB_URL") or "").strip()
         if target_job_url and not target_job_id.isdigit():
             target=session.scalar(select(Job).where(Job.apply_url==target_job_url))
@@ -443,6 +503,9 @@ def run():
             sent=session.scalar(select(JobStatus).where(JobStatus.job_id==job.id,JobStatus.status=="submitted"))
             if (existing and existing.status=="applied") or sent:
                 stats["alreadyApplied"]+=1;continue
+            if existing and existing.status=="needs_human" and not target_job_id.isdigit() and review_is_waiting_for_user(session,existing.id):
+                record_event(session,job.id,"applying","awaiting_review","Waiting for the user to answer only the unresolved review fields.",application_id=existing.id)
+                session.commit();continue
 
             research=research_job(session,job,profile)
             if research.quality_score<45:
@@ -489,6 +552,7 @@ def run():
 
             apply_doc=tailored_doc_for(session,job,doc)
             learned=learned_answers_for(session,job.apply_url,profile)
+            learned.extend(review_answers_for(session,existing.id))
             record_event(session,job.id,"prepared","prepared",f"Probability {metric.probability}%; difficulty {metric.difficulty}%.",application_id=existing.id)
             record_event(session,job.id,"applying","attempt_started","LangGraph application attempt started.",application_id=existing.id)
 
@@ -511,12 +575,14 @@ def run():
             if state=="applied":
                 existing.status="applied";existing.receipt=result.get("receipt","browser-confirmed")
                 mark_status(session,job.id,"submitted",existing.receipt);stats["applied"]+=1
+                resolve_review_fields(session,existing.id)
                 record_event(session,job.id,"submitted","confirmed",existing.receipt,application_id=existing.id,meta=result.get("meta") or {})
             elif state in {"needs_human","ready"}:
                 reason=result.get("reason","Review required")
                 existing.status="needs_human";existing.receipt=reason
                 mark_status(session,job.id,"not_submitted",reason);stats["needsAttention"]+=1
                 remember_blocker(session,job,reason)
+                store_review_fields(session,existing.id,job,result)
                 record_event(session,job.id,"applying",classify_failure(reason),reason,application_id=existing.id)
             else:
                 reason=result.get("reason","Automation failed")
@@ -529,6 +595,24 @@ def run():
         session.commit()
 
     return stats
+
+def retry_application(application_id:int):
+    """Retry one reviewed application through the same LangGraph pipeline."""
+    with SessionLocal() as session:
+        app=session.get(Application,application_id)
+        if not app:
+            return {"status":"not_found"}
+        pending=session.scalars(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.resolved==False,
+        )).all()
+        missing=[r.label_key for r in pending if not (r.answer or "").strip()]
+        if missing:
+            return {"status":"needs_answers","missing":missing[:12]}
+        job_id=app.job_id
+        record_event(session,job_id,"applying","review_retry_queued","User supplied review answers; LangGraph retry starting.",application_id=application_id)
+        session.commit()
+    return run(target_job_id_override=job_id)
 
 if __name__=="__main__":
     print(run())
