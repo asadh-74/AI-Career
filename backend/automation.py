@@ -46,7 +46,18 @@ def load_profile():
     raw=os.getenv("APPLICANT_PROFILE_JSON","").strip()
     if not raw:return {}
     try:
-        data=json.loads(raw); return data if isinstance(data,dict) else {}
+        data=json.loads(raw)
+        if not isinstance(data,dict):return {}
+        # Verified non-sensitive defaults from the canonical Career Atlas resume.
+        # Runtime profile values always win when explicitly configured.
+        data.setdefault("country","Pakistan")
+        data.setdefault("city","Islamabad")
+        data.setdefault("university","National University of Sciences and Technology (NUST)")
+        data.setdefault("degree","Bachelor's degree")
+        data.setdefault("degree_name","B.E. Electrical Engineering")
+        data.setdefault("field_of_study","Electrical Engineering")
+        data.setdefault("graduation_year","2027")
+        return data
     except json.JSONDecodeError:return {}
 
 def load_sensitive_profile():
@@ -204,6 +215,69 @@ def _answer_boolean(page,label_pattern,value):
     except Exception:pass
     return False
 
+def _select_or_fill_labeled(page,label_pattern,value,aliases=()):
+    if value in (None,""):return False
+    candidates=[str(value),*[str(x) for x in aliases if x]]
+    try:
+        field=page.get_by_label(re.compile(label_pattern,re.I))
+        for i in range(min(field.count(),8)):
+            item=field.nth(i)
+            try:
+                if not item.is_visible():continue
+                tag=item.evaluate("(el)=>el.tagName.toLowerCase()")
+                role=(item.get_attribute("role") or "").lower()
+                if tag=="select":
+                    for candidate in candidates:
+                        try:item.select_option(label=re.compile(rf"^{re.escape(candidate)}$",re.I));return True
+                        except Exception:pass
+                    continue
+                if role=="combobox":
+                    item.click()
+                    for candidate in candidates:
+                        try:
+                            option=page.get_by_role("option",name=re.compile(rf"^{re.escape(candidate)}$",re.I))
+                            if option.count():option.first.click();return True
+                        except Exception:pass
+                typ=(item.get_attribute("type") or "").lower()
+                if typ not in ("radio","checkbox","file"):
+                    item.fill(str(value));return True
+            except Exception:pass
+    except Exception:pass
+    # Custom ATS dropdowns often expose only a visible label and listbox.
+    try:
+        labels=page.locator("label")
+        for i in range(min(labels.count(),120)):
+            txt=(labels.nth(i).inner_text() or "").strip()
+            if not re.search(label_pattern,txt,re.I):continue
+            parent=labels.nth(i).locator("xpath=..")
+            combo=parent.get_by_role("combobox")
+            if combo.count():
+                combo.first.click()
+                for candidate in candidates:
+                    option=page.get_by_role("option",name=re.compile(rf"^{re.escape(candidate)}$",re.I))
+                    if option.count():option.first.click();return True
+    except Exception:pass
+    return False
+
+def _fill_verified_profile_questions(page,profile):
+    touched=[]
+    mappings=(
+        ("country",r"country(?: of residence)?|current country",profile.get("country") or "Pakistan",()),
+        ("city",r"current city|city of residence|^city$",profile.get("city") or "Islamabad",()),
+        ("university",r"university|college|school",profile.get("university"),("NUST",)),
+        ("degree",r"degree level|highest degree|degree type|education level",profile.get("degree"),("Bachelor","Bachelors","Bachelor's","Undergraduate")),
+        ("degree_name",r"degree name|qualification",profile.get("degree_name"),()),
+        ("field_of_study",r"field of study|major|discipline",profile.get("field_of_study"),("Electrical Engineering","Engineering")),
+        ("graduation_year",r"graduation year|year of graduation|expected graduation",profile.get("graduation_year"),("2027",)),
+        ("linkedin",r"linkedin",profile.get("linkedin"),()),
+        ("github",r"github",profile.get("github"),()),
+        ("portfolio",r"portfolio|personal website|website",profile.get("portfolio"),()),
+    )
+    for key,pattern,value,aliases in mappings:
+        if value and _select_or_fill_labeled(page,pattern,value,aliases):
+            touched.append(key)
+    return touched
+
 def _fill_standard_fields(page,profile,draft,resume_path):
     name=str(profile.get("name","")).strip()
     parts=name.split()
@@ -230,9 +304,10 @@ def _fill_standard_fields(page,profile,draft,resume_path):
     _fill_css(page,['input[name*="github" i]'],profile.get("github",""))
     _fill_css(page,['input[name*="portfolio" i]','input[name*="website" i]'],profile.get("portfolio",""))
 
-    country="Pakistan" if "pakistan" in str(profile.get("location","")).lower() else ""
+    country=profile.get("country") or ("Pakistan" if "pakistan" in str(profile.get("location","")).lower() else "")
     if country:
         _select_known_answer(page,r"country|current country|country of residence",country)
+    _fill_verified_profile_questions(page,profile)
 
     _answer_boolean(page,r"authorized to work|work authorization|legally authorized",profile.get("work_authorized"))
     sponsorship=profile.get("requires_sponsorship")
@@ -323,7 +398,8 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
     required=root.locator("input[required], textarea[required], select[required]")
     safe_tokens=("name","email","phone","mobile","location","city","country","linkedin","github","portfolio","website",
                  "resume","cv","cover","message","additional","authorization","authorized","sponsorship","salary",
-                 "availability","start date")
+                 "availability","start date","university","college","school","degree","education","major","field of study",
+                 "graduation","graduate year","expected graduation")
     for i in range(min(required.count(),120)):
         field=required.nth(i)
         try:
