@@ -78,6 +78,7 @@ class _WorkspaceState extends State<Workspace> {
   List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
   Map<String,dynamic> dashboard={};
   String query='', statusFilter='all', qualityMode='balanced';
+  String applicationQuery='';
   bool reviewOnly=false;
   @override void initState(){super.initState();reload();}
   Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
@@ -167,6 +168,51 @@ class _WorkspaceState extends State<Workspace> {
         actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close'))],
       ));
     }catch(e){message('$e');}
+  }
+
+  Future<void> locateSubmittedApplication() async {
+    final controller=TextEditingController();
+    await showDialog(context:context,builder:(c)=>AlertDialog(
+      title:const Text('Find a submitted application'),
+      content:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Paste the employer application or confirmation URL. Career Atlas will find the matching job and application.'),
+        const SizedBox(height:10),
+        TextField(
+          controller:controller,
+          keyboardType:TextInputType.url,
+          autocorrect:false,
+          decoration:const InputDecoration(
+            labelText:'Confirmation URL',
+            hintText:'https://job-boards.greenhouse.io/company/jobs/123/confirmation',
+            border:OutlineInputBorder(),
+          ),
+        ),
+      ]),
+      actions:[
+        TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Cancel')),
+        FilledButton.icon(onPressed:()async{
+          final value=controller.text.trim();
+          if(value.isEmpty)return;
+          try{
+            final result=await api.request('POST','applications/locate',{'url':value});
+            final job=Map<String,dynamic>.from(result['job'] as Map);
+            final app=result['application'];
+            if(c.mounted)Navigator.pop(c);
+            setState((){
+              tab=1;
+              reviewOnly=false;
+              applicationQuery=(job['title']??job['company']??job['id'].toString()).toString();
+            });
+            if(app==null){
+              message('Job found: ${job['title']}. No Career Atlas application record exists yet.');
+            }else{
+              message('Found ${job['company']} · ${job['title']}.');
+            }
+          }catch(e){message('$e');}
+        },icon:const Icon(Icons.search),label:const Text('Find application'))
+      ],
+    ));
+    controller.dispose();
   }
 
   Future<void> confirmApplication(Map application) async {
@@ -272,7 +318,19 @@ class _WorkspaceState extends State<Workspace> {
   ]);
   Widget applicationsView(){
     final reviewApps=applications.where((x)=>(x as Map)['status']=='needs_human').toList();
-    final visible=reviewOnly?reviewApps:applications;
+    final base=reviewOnly?reviewApps:applications;
+    final needle=applicationQuery.trim().toLowerCase();
+    final visible=base.where((item){
+      if(needle.isEmpty)return true;
+      final a=item as Map;
+      final related=jobs.where((j)=>j['id']==a['jobId']).toList();
+      final job=related.isEmpty?null:related.first as Map?;
+      final hay=[
+        a['id'],a['jobId'],a['score'],a['status'],a['receipt'],a['rationale'],
+        job?['company'],job?['title'],job?['provider'],job?['location'],job?['applyUrl'],job?['url']
+      ].map((x)=>(x??'').toString().toLowerCase()).join(' ');
+      return hay.contains(needle);
+    }).toList();
     return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       Row(children:[
         Expanded(child:Text('Applications',style:Theme.of(context).textTheme.headlineSmall)),
@@ -280,11 +338,31 @@ class _WorkspaceState extends State<Workspace> {
       ]),
       const SizedBox(height:8),
       Text('${jobStatuses.where((s)=>s['status']=='submitted').length} confirmed submitted · ${reviewApps.length} need review · ${applications.length} application records'),
+      const SizedBox(height:10),
+      TextField(
+        onChanged:(x)=>setState(()=>applicationQuery=x),
+        controller:TextEditingController(text:applicationQuery)..selection=TextSelection.collapsed(offset:applicationQuery.length),
+        decoration:InputDecoration(
+          prefixIcon:const Icon(Icons.search),
+          hintText:'Search company, role, provider, score, job ID or URL',
+          suffixIcon:applicationQuery.isEmpty?null:IconButton(
+            icon:const Icon(Icons.clear),
+            onPressed:()=>setState(()=>applicationQuery=''),
+          ),
+          filled:true,
+          border:const OutlineInputBorder(),
+        ),
+      ),
       const SizedBox(height:8),
-      Wrap(spacing:8,children:[
+      Wrap(spacing:8,runSpacing:8,children:[
         ChoiceChip(label:Text('All (${applications.length})'),selected:!reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=false)),
         ChoiceChip(label:Text('Needs review (${reviewApps.length})'),selected:reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=true)),
+        OutlinedButton.icon(onPressed:locateSubmittedApplication,icon:const Icon(Icons.link),label:const Text('Paste confirmation URL')),
       ]),
+      if(needle.isNotEmpty)Padding(
+        padding:const EdgeInsets.only(top:7),
+        child:Text('Showing ${visible.length} matching application${visible.length==1?'':'s'}'),
+      ),
       const SizedBox(height:10),
       Expanded(child:visible.isEmpty
         ? Center(child:Text(reviewOnly?'No applications currently need review.':'No application records yet.'))
