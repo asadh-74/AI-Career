@@ -237,6 +237,20 @@ def resolve_review_fields(session,application_id):
             row.answer=""
         row.updated_at=datetime.now(timezone.utc)
 
+def cleanup_false_review_fields(session):
+    """Resolve legacy ATS implementation-detail rows that never need user input."""
+    fixed=0
+    rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.resolved==False)).all()
+    for row in rows:
+        low=(row.label_key or "").lower()
+        if any(x in low for x in ('aria-hidden="true"',"aria-hidden='true'",'tabindex="-1"',"tabindex='-1'","requiredinput")):
+            row.resolved=True
+            row.answer=""
+            row.updated_at=datetime.now(timezone.utc)
+            fixed+=1
+    if fixed:session.flush()
+    return fixed
+
 def backfill_review_queue(session):
     """Convert legacy needs_human receipts into structured review rows.
 
@@ -480,6 +494,7 @@ def run(target_job_id_override=None):
     with SessionLocal() as session:
         stats["invalidEmailSubmissionsCorrected"]=cleanup_invalid_email_submissions(session)
         stats["prioritySourcesAdded"]=ensure_priority_sources(session)
+        stats["falseReviewFieldsRemoved"]=cleanup_false_review_fields(session)
         stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
