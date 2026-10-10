@@ -398,7 +398,13 @@ def applications(session:Session=Depends(db)):
     for item,job in rows:
         row=app_out(item,job)
         if item.status in ("needs_human","ready_for_retry"):
-            row["reviewQuestions"]=_review_questions_for(session,item)
+            review_rows=_ensure_review_fields(session,item)
+            row["reviewQuestions"]=[{
+                "id":x.id,
+                "label":x.label_key,
+                "sensitive":x.sensitive,
+                "answered":bool((x.answer or "").strip()),
+            } for x in review_rows]
             row["reviewQueued"]=item.status=="ready_for_retry"
         else:
             row["reviewQuestions"]=[]
@@ -760,7 +766,7 @@ def v3_review_fields(application_id:int,session:Session=Depends(db)):
         'officialForm':job.apply_url if job else '',
         'status':application.status,
         'fields':[{
-            'id':row.id,'label':row.label_key,'answer':row.answer,
+            'id':row.id,'label':row.label_key,'answer':'' if row.sensitive else row.answer,
             'selectorHint':row.selector_hint,'sensitive':row.sensitive,'resolved':row.resolved,
             'memoryPolicy':'one_application_only' if row.sensitive else 'application_review'
         } for row in rows]
@@ -792,6 +798,8 @@ def v3_review_submit(application_id:int,body:ReviewSubmitIn,background_tasks:Bac
             'message':'This employer requires protected demographic information. Career Atlas will not guess or auto-fill it.'
         }
     application.status='ready_for_retry'
+    application.status='ready_for_retry'
+    application.receipt='Review answers saved. Career Atlas will refill all known fields and retry automatically.'
     record_event(session,application.job_id,'applying','review_answers_saved',
                  'User supplied only the unresolved application answers; LangGraph retry queued.',
                  application_id=application.id)
