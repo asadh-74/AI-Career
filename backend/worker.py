@@ -30,11 +30,15 @@ TARGET_TITLE_TERMS=(
     "software engineer","software developer","application developer","python engineer","python developer","python",
     "backend engineer","backend developer","back-end engineer","back-end developer","backend","back-end","fastapi","api engineer",
     "frontend engineer","frontend developer","front-end engineer","front-end developer","frontend","front-end","web developer",
-    "full stack","full-stack","fullstack","ai engineer","machine learning","ml engineer","automation","agentic",
-    "artificial intelligence","platform engineer","data engineer","embedded","iot","computer vision",
-    "ai integrator","ai integration","workflow automation","automation specialist","automations associate",
-    "product support engineer","technical support engineer","solutions engineer","integration engineer",
-    "data scientist","mlops engineer","ai evaluation engineer",
+    "full stack","full-stack","fullstack","ai engineer","machine learning engineer","ml engineer","automation engineer",
+    "agentic ai","agentic engineer","artificial intelligence engineer","platform engineer","data engineer",
+    "ai integrator","ai integration","workflow automation","integration engineer","mlops engineer",
+)
+
+SOFTWARE_ONLY_EXCLUDED=(
+    "data scientist","data analyst","business analyst","research scientist","embedded","firmware","iot","hardware",
+    "electrical","electronics","support engineer","technical support","solutions engineer","sales","account executive",
+    "customer success","product manager","project manager","qa analyst","manual tester",
 )
 
 def mark_status(session,job_id,status,note):
@@ -61,7 +65,12 @@ def title_relevant(title:str)->bool:
     t=(title or "").lower()
     excluded=("director","vice president","vp ","head of ","principal","staff engineer","engineering manager",
               "sales manager","sales director","account manager","solutions architecture manager","senior ","sr. ","sr ","lead ")
-    return not any(x in t for x in excluded) and any(x in t for x in TARGET_TITLE_TERMS)
+    if any(x in t for x in excluded):
+        return False
+    if os.getenv("SOFTWARE_ONLY","false").lower() in {"1","true","yes","on"}:
+        if any(x in t for x in SOFTWARE_ONLY_EXCLUDED):
+            return False
+    return any(x in t for x in TARGET_TITLE_TERMS)
 AGGREGATOR_PROVIDERS={"wwr","arbeitnow","remotive","jobicy","remoteok","himalayas"}
 
 def direct_apply_priority(job)->int:
@@ -406,7 +415,7 @@ def run():
         submitted_today=len(session.scalars(select(JobStatus).where(JobStatus.status=="submitted",JobStatus.updated_at>=day_start_utc)).all())
         stats["submittedToday"]=submitted_today
         remaining_today=max(0,cfg.daily_limit-submitted_today);stats["remainingToday"]=remaining_today
-        max_attempts=max(20,min(70,remaining_today*7 if remaining_today else 20))
+        max_attempts=max(30,min(150,remaining_today*8 if remaining_today else 30))
 
         for job in jobs:
             if not job:continue
