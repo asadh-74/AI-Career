@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import httpx
-from fastapi import FastAPI, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, BackgroundTasks, Depends, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -525,6 +525,13 @@ class QuestionMemoryIn(BaseModel):
     answer_key: str = Field(default='', max_length=120)
     selector_hint: str = Field(default='', max_length=400)
 
+class ReviewFieldAnswerIn(BaseModel):
+    field_id: int
+    answer: str = Field(default='', max_length=2000)
+
+class ReviewSubmitIn(BaseModel):
+    answers: list[ReviewFieldAnswerIn] = Field(default_factory=list)
+
 class ReviewAnswerItemIn(BaseModel):
     label: str = Field(min_length=1, max_length=500)
     answer: str = Field(min_length=1, max_length=3000)
@@ -701,6 +708,92 @@ def v3_update_question(question_id:int,body:QuestionMemoryIn,session:Session=Dep
     item.last_seen_at=datetime.now(timezone.utc)
     session.commit()
     return {'id':item.id,'answerKey':item.answer_key,'sensitive':item.sensitive}
+
+def _ensure_review_fields(session:Session,application:Application):
+    rows=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application.id,
+        ReviewAnswer.resolved==False,
+    )).all()
+    if rows:
+        return rows
+    if application.status!='needs_human':
+        return []
+    from automation import needs_human
+    for item in extract_review_questions(application.receipt or ''):
+        label=(item.get('label') or '').strip()[:500]
+        if not label: continue
+        sensitive=bool(item.get('sensitive') or needs_human(label))
+        existing=session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application.id,
+            ReviewAnswer.label_key==label,
+        ))
+        if not existing:
+            existing=ReviewAnswer(
+                application_id=application.id,
+                label_key=label,
+                answer='',
+                selector_hint=(item.get('selector_hint') or '')[:500],
+                sensitive=sensitive,
+                resolved=False,
+            )
+            session.add(existing)
+        else:
+            existing.sensitive=sensitive
+            existing.resolved=False
+    session.commit()
+    return session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application.id,
+        ReviewAnswer.resolved==False,
+    )).all()
+
+@app.get('/api/v3/applications/{application_id}/review-fields', dependencies=[Depends(auth)])
+def v3_review_fields(application_id:int,session:Session=Depends(db)):
+    application=session.get(Application,application_id)
+    if not application: raise HTTPException(404,'Application not found')
+    job=session.get(Job,application.job_id)
+    rows=_ensure_review_fields(session,application)
+    return {
+        'applicationId':application.id,
+        'jobId':application.job_id,
+        'company':job.company if job else '',
+        'title':job.title if job else '',
+        'officialForm':job.apply_url if job else '',
+        'status':application.status,
+        'fields':[{
+            'id':row.id,'label':row.label_key,'answer':row.answer,
+            'selectorHint':row.selector_hint,'sensitive':row.sensitive,'resolved':row.resolved,
+            'memoryPolicy':'one_application_only' if row.sensitive else 'application_review'
+        } for row in rows]
+    }
+
+@app.post('/api/v3/applications/{application_id}/review-submit', dependencies=[Depends(auth)])
+def v3_review_submit(application_id:int,body:ReviewSubmitIn,background_tasks:BackgroundTasks,session:Session=Depends(db)):
+    application=session.get(Application,application_id)
+    if not application: raise HTTPException(404,'Application not found')
+    job=session.get(Job,application.job_id)
+    rows=_ensure_review_fields(session,application)
+    by_id={row.id:row for row in rows}
+    for entry in body.answers:
+        row=by_id.get(entry.field_id)
+        if not row: continue
+        row.answer=entry.answer.strip()[:2000]
+        row.updated_at=datetime.now(timezone.utc)
+    session.flush()
+    missing=[row.label_key for row in rows if not (row.answer or '').strip()]
+    if missing:
+        session.commit()
+        return {'status':'needs_answers','missing':missing[:12]}
+    record_event(session,application.job_id,'applying','review_answers_saved',
+                 'User supplied only the unresolved application answers; LangGraph retry queued.',
+                 application_id=application.id)
+    session.commit()
+    from worker import retry_application
+    background_tasks.add_task(retry_application,application.id)
+    return {
+        'status':'retry_started',
+        'message':'Answers saved. The agent will refill the complete employer form and retry submission.',
+        'officialForm':job.apply_url if job else ''
+    }
 
 @app.get('/api/v3/resume-variants', dependencies=[Depends(auth)])
 def v3_resume_variants(session:Session=Depends(db)):
