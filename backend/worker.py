@@ -473,6 +473,20 @@ def run(target_job_id_override=None):
             recent.sort(key=lambda j:(direct_apply_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
             jobs=strategy_select(recent,160)
             session.flush()
+
+        # Applications for which the user answered only the missing review
+        # questions jump to the front of the next LangGraph run.
+        retry_jobs=session.scalars(
+            select(Job).join(Application,Application.job_id==Job.id)
+            .where(Application.status=="retry_ready")
+            .order_by(Application.created_at.asc())
+        ).all()
+        if retry_jobs:
+            seen=set();ordered=[]
+            for candidate in [*retry_jobs,*jobs]:
+                if candidate and candidate.id not in seen:
+                    ordered.append(candidate);seen.add(candidate.id)
+            jobs=ordered
         max_to_score=max(50,min(120,cfg.daily_limit*10))
 
         pkt=ZoneInfo("Asia/Karachi");now_pkt=datetime.now(pkt)
