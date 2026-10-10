@@ -118,6 +118,36 @@ def learned_answers_for(session,url,profile):
             out.append({"label":row.label_key,"selector_hint":row.selector_hint,"value":value})
     return out
 
+def verified_answer_for_review(profile,label):
+    """Resolve a review question only from explicit verified profile facts."""
+    low=(label or "").lower()
+    mapping=(
+        (("linkedin",),"linkedin"),
+        (("github",),"github"),
+        (("portfolio","personal website","website"),"portfolio"),
+        (("country",),"country"),
+        (("city",),"city"),
+        (("university","college","school"),"university"),
+        (("field of study","main field","major","discipline"),"field_of_study"),
+        (("degree name","qualification"),"degree_name"),
+        (("degree level","degree type","highest degree","education level"),"degree"),
+        (("graduation year","expected graduation","year of graduation"),"graduation_year"),
+        (("availability","when can you start","start date"),"availability"),
+        (("salary expectation","expected salary","desired salary"),"salary_expectation_amount"),
+    )
+    for tokens,key in mapping:
+        if any(token in low for token in tokens):
+            value=_profile_value(profile,key)
+            if value not in (None,""):return str(value)
+    # Explicit booleans are safe to reuse only when present in the profile.
+    if any(x in low for x in ("authorized to work","work authorization","legally authorized")):
+        value=profile.get("work_authorized")
+        if value is not None:return "Yes" if bool(value) else "No"
+    if any(x in low for x in ("require sponsorship","need sponsorship","visa sponsorship")):
+        value=profile.get("requires_sponsorship")
+        if value is not None:return "Yes" if bool(value) else "No"
+    return ""
+
 def remember_blocker(session,job,reason):
     host=(urlparse(job.apply_url or "").hostname or "").lower()
     for part in [x.strip() for x in (reason or "").split(" | ") if x.strip()]:
@@ -575,6 +605,35 @@ def run(target_job_id_override=None):
             state=result.get("status","failed")
             if state=="below_threshold":
                 stats["belowThreshold"]+=1;session.commit();continue
+
+            # LangGraph human-in-the-loop self-repair: before asking the user,
+            # resolve custom ATS fields from verified profile facts and retry once.
+            if state in {"needs_human","ready"}:
+                questions=result.get("review_fields") or extract_review_questions(result.get("reason",""))
+                if questions:
+                    store_review_fields(session,existing.id,job,result)
+                    rows=session.scalars(select(ReviewAnswer).where(
+                        ReviewAnswer.application_id==existing.id,
+                        ReviewAnswer.resolved==False,
+                    )).all()
+                    auto_count=0
+                    for row in rows:
+                        if row.sensitive or (row.answer or "").strip():
+                            continue
+                        value=verified_answer_for_review(profile,row.label_key)
+                        if value:
+                            row.answer=value
+                            row.updated_at=datetime.now(timezone.utc)
+                            auto_count+=1
+                    if auto_count:
+                        session.flush()
+                        smarter=list(learned)
+                        smarter.extend(review_answers_for(session,existing.id))
+                        record_event(session,job.id,"applying","review_autofill",
+                                     f"Resolved {auto_count} ATS review field(s) from verified profile; LangGraph retrying automatically.",
+                                     application_id=existing.id)
+                        result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=smarter)
+                        state=result.get("status","failed")
 
             stats["processed"]+=1
             if state=="failed":
