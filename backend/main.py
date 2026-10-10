@@ -80,7 +80,8 @@ class JobStatus(Base):
 from v3_models import (
     ApplicationArtifact, ApplicationEvent, AutomationSetting, EmployerMessage,
     FollowUpDraft, InterviewPrep, JobMetric, QuestionMemory, ResearchResult,
-    ResumeVariant, get_setting, quality_threshold, record_event, set_setting,
+    ResumeVariant, ReviewAnswer, extract_review_questions, get_setting,
+    quality_threshold, record_event, set_setting,
 )
 Base.metadata.create_all(engine)
 
@@ -393,7 +394,17 @@ def applications(session:Session=Depends(db)):
                     changed=True
         if changed:
             session.commit()
-    return [app_out(item,job) for item,job in rows]
+    output=[]
+    for item,job in rows:
+        row=app_out(item,job)
+        if item.status in ("needs_human","ready_for_retry"):
+            row["reviewQuestions"]=_review_questions_for(session,item)
+            row["reviewQueued"]=item.status=="ready_for_retry"
+        else:
+            row["reviewQuestions"]=[]
+            row["reviewQueued"]=False
+        output.append(row)
+    return output
 
 @app.post('/api/applications/locate', dependencies=[Depends(auth)])
 def locate_application(body:LocateApplicationIn,session:Session=Depends(db)):
@@ -514,6 +525,13 @@ class QuestionMemoryIn(BaseModel):
     answer_key: str = Field(default='', max_length=120)
     selector_hint: str = Field(default='', max_length=400)
 
+class ReviewAnswerItemIn(BaseModel):
+    label: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=3000)
+
+class ReviewAnswersIn(BaseModel):
+    answers: list[ReviewAnswerItemIn]
+
 @app.get('/api/v3/dashboard', dependencies=[Depends(auth)])
 def v3_dashboard(session:Session=Depends(db)):
     statuses=session.scalars(select(JobStatus)).all()
@@ -577,6 +595,89 @@ def v3_set_stage(application_id:int,body:StageIn,session:Session=Depends(db)):
     record_event(session,item.job_id,body.stage,'manual_stage',body.note,application_id=item.id)
     session.commit()
     return {'ok':True,'stage':body.stage}
+
+def _review_questions_for(session:Session,item:Application):
+    extracted=extract_review_questions(item.receipt or "")
+    saved=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==item.id)).all()
+    by_label={x.label_key:x for x in saved}
+    out=[]
+    for q in extracted:
+        row=by_label.get(q["label"])
+        out.append({
+            "label":q["label"],
+            "sensitive":bool(q["sensitive"]),
+            "answered":bool(row and (row.answer or "").strip()),
+            "answer":"" if q["sensitive"] else ((row.answer or "") if row else ""),
+        })
+    return out
+
+@app.get('/api/v3/applications/{application_id}/review-questions', dependencies=[Depends(auth)])
+def v3_review_questions(application_id:int,session:Session=Depends(db)):
+    item=session.get(Application,application_id)
+    if not item: raise HTTPException(404,'Application not found')
+    return {
+        "applicationId":item.id,
+        "status":item.status,
+        "questions":_review_questions_for(session,item),
+        "queued":item.status=="ready_for_retry",
+    }
+
+@app.post('/api/v3/applications/{application_id}/review-answers', dependencies=[Depends(auth)])
+def v3_review_answers(application_id:int,body:ReviewAnswersIn,session:Session=Depends(db)):
+    item=session.get(Application,application_id)
+    if not item: raise HTTPException(404,'Application not found')
+    job=session.get(Job,item.job_id)
+    questions={q["label"]:q for q in extract_review_questions(item.receipt or "")}
+    if not questions:
+        raise HTTPException(400,'No structured review questions were found for this application')
+
+    saved=0
+    manual=[]
+    now=datetime.now(timezone.utc)
+    for entry in body.answers:
+        label=entry.label.strip()
+        answer=entry.answer.strip()
+        q=questions.get(label)
+        if not q:
+            raise HTTPException(400,f'Unknown review question: {label[:100]}')
+        if q["sensitive"]:
+            manual.append(label)
+            continue
+        row=session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==item.id,
+            ReviewAnswer.label_key==label,
+        ))
+        if not row:
+            row=ReviewAnswer(application_id=item.id,label_key=label)
+            session.add(row)
+        row.answer=answer
+        row.sensitive=False
+        row.resolved=False
+        row.updated_at=now
+        saved+=1
+
+    remaining_non_sensitive=[
+        q for q in questions.values()
+        if not q["sensitive"] and not session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==item.id,
+            ReviewAnswer.label_key==q["label"],
+            ReviewAnswer.answer!="",
+        ))
+    ]
+    if saved:
+        item.status="ready_for_retry"
+        record_event(session,item.job_id,'applying','review_answered',
+                     f'{saved} review answer(s) supplied; queued for LangGraph retry.',
+                     application_id=item.id)
+    session.commit()
+    return {
+        "ok":True,
+        "saved":saved,
+        "manualOnly":manual,
+        "queued":bool(saved),
+        "remaining":len(remaining_non_sensitive),
+        "job":job_out(job) if job else None,
+    }
 
 @app.get('/api/v3/questions', dependencies=[Depends(auth)])
 def v3_questions(session:Session=Depends(db)):
