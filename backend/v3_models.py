@@ -69,6 +69,22 @@ class ReviewAnswer(Base):
     updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
     __table_args__=(UniqueConstraint("application_id","label_key",name="uq_review_answer_application_label"),)
 
+class ApplicationReviewField(Base):
+    __tablename__="application_review_fields"
+    id:Mapped[int]=mapped_column(primary_key=True)
+    application_id:Mapped[int]=mapped_column(ForeignKey("applications.id"),index=True)
+    host:Mapped[str]=mapped_column(String(180),default="",index=True)
+    label:Mapped[str]=mapped_column(Text)
+    field_kind:Mapped[str]=mapped_column(String(40),default="answer")
+    selector_hint:Mapped[str]=mapped_column(String(400),default="")
+    sensitive:Mapped[bool]=mapped_column(Boolean,default=False)
+    answer:Mapped[str]=mapped_column(Text,default="")
+    remember:Mapped[bool]=mapped_column(Boolean,default=False)
+    status:Mapped[str]=mapped_column(String(32),default="pending")
+    created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+    __table_args__=(UniqueConstraint("application_id","label",name="uq_review_field_application_label"),)
+
 class ResumeVariant(Base):
     __tablename__="resume_variants"
     id:Mapped[int]=mapped_column(primary_key=True)
