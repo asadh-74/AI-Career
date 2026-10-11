@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-12-explicit-review-retry-v2
+# direct-source-batch: 2026-10-12-requeue-answered-reviews
 name: Career Atlas Automation
 
 on:
