@@ -597,13 +597,27 @@ def run(target_job_id_override=None):
         for job in jobs:
             if not job:continue
             stats["jobsConsidered"]+=1
-            # Canonical's current Greenhouse forms require protected
-            # demographic answers. Keep them discoverable in the dashboard,
-            # but do not spend automatic-application attempts on them.
+
+            # Canonical and similar forms may contain protected questions.
+            # Skip them only when the user has NOT supplied explicit answers
+            # for this specific application. Answered review jobs are allowed
+            # to resume through LangGraph and are never inferred/reused.
+            pre_existing=session.scalar(select(Application).where(Application.job_id==job.id))
             if (job.company or "").strip().lower()=="canonical":
-                record_event(session,job.id,"discovered","protected_fields_skip","Automatic submission skipped because the employer form requires protected demographic answers.")
-                session.commit()
-                continue
+                review_ready=bool(
+                    pre_existing
+                    and pre_existing.status=="ready_for_retry"
+                    and not review_is_waiting_for_user(session,pre_existing.id)
+                )
+                if not review_ready:
+                    record_event(
+                        session,job.id,"discovered","protected_fields_skip",
+                        "Waiting for explicit one-application review answers before automatic submission.",
+                        application_id=(pre_existing.id if pre_existing else None)
+                    )
+                    session.commit()
+                    continue
+
             if stats["applied"]>=remaining_today or stats["processed"]>=max_attempts or stats["scored"]>=max_to_score:break
             if cfg.remote_only and not remote_eligible(job):continue
             stats["remoteEligible"]+=1
@@ -611,7 +625,7 @@ def run(target_job_id_override=None):
             stats["titleRelevant"]+=1
             if not provider_allowed(job.provider,cfg) or not host_allowed(job.apply_url):continue
 
-            existing=session.scalar(select(Application).where(Application.job_id==job.id))
+            existing=pre_existing or session.scalar(select(Application).where(Application.job_id==job.id))
             sent=session.scalar(select(JobStatus).where(JobStatus.job_id==job.id,JobStatus.status=="submitted"))
             if (existing and existing.status=="applied") or sent:
                 stats["alreadyApplied"]+=1;continue
