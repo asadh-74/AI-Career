@@ -762,8 +762,9 @@ def retry_application(application_id:int):
             ReviewAnswer.resolved==False,
             ReviewAnswer.sensitive==True,
         )).all()
-        if sensitive:
-            return {"status":"manual_required","missing":[r.label_key for r in sensitive[:12]]}
+        missing_sensitive=[r.label_key for r in sensitive if not (r.answer or "").strip()]
+        if missing_sensitive:
+            return {"status":"needs_answers","missing":missing_sensitive[:12]}
         pending=session.scalars(select(ReviewAnswer).where(
             ReviewAnswer.application_id==application_id,
             ReviewAnswer.resolved==False,
