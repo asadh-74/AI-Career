@@ -254,6 +254,28 @@ def cleanup_false_review_fields(session):
     if fixed:session.flush()
     return fixed
 
+def requeue_answered_reviews(session):
+    """Recover review jobs whose explicit answers are complete but status regressed."""
+    moved=0
+    apps=session.scalars(select(Application).where(Application.status=="needs_human")).all()
+    for app in apps:
+        rows=session.scalars(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==app.id,
+            ReviewAnswer.resolved==False,
+        )).all()
+        if not rows:
+            continue
+        if all((r.answer or "").strip() for r in rows):
+            app.status="ready_for_retry"
+            app.receipt="All review answers are already saved. LangGraph retry queued automatically."
+            record_event(session,app.job_id,"applying","review_requeued",
+                         "All unresolved review fields already have explicit answers; retry restored automatically.",
+                         application_id=app.id)
+            moved+=1
+    if moved:
+        session.flush()
+    return moved
+
 def backfill_review_queue(session):
     """Convert legacy needs_human receipts into structured review rows.
 
@@ -499,6 +521,7 @@ def run(target_job_id_override=None):
         stats["prioritySourcesAdded"]=ensure_priority_sources(session)
         stats["falseReviewFieldsRemoved"]=cleanup_false_review_fields(session)
         stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
+        stats["answeredReviewsRequeued"]=requeue_answered_reviews(session)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
