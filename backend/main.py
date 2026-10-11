@@ -459,18 +459,26 @@ def submitted_applications(session:Session=Depends(db)):
         .where(Application.status=="applied",JobStatus.status=="submitted")
         .order_by(JobStatus.updated_at.desc())
     ).all()
-    return [{
-        "applicationId":a.id,
-        "jobId":j.id,
-        "company":j.company,
-        "title":j.title,
-        "location":j.location,
-        "provider":j.provider,
-        "applyUrl":j.apply_url,
-        "score":a.score,
-        "receipt":a.receipt or s.note,
-        "submittedAt":s.updated_at.isoformat(),
-    } for a,j,s in rows]
+    unique=[]
+    seen=set()
+    for a,j,s in rows:
+        key=((j.apply_url or "").strip().lower(),(j.company or "").strip().lower(),(j.title or "").strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append({
+            "applicationId":a.id,
+            "jobId":j.id,
+            "company":j.company,
+            "title":j.title,
+            "location":j.location,
+            "provider":j.provider,
+            "applyUrl":j.apply_url,
+            "score":a.score,
+            "receipt":a.receipt or s.note,
+            "submittedAt":s.updated_at.isoformat(),
+        })
+    return unique
 
 @app.post('/api/applications/{application_id}/confirm', dependencies=[Depends(auth)])
 def confirm(application_id:int,body:ConfirmIn,session:Session=Depends(db)):
@@ -551,7 +559,15 @@ def v3_dashboard(session:Session=Depends(db)):
     apps=session.scalars(select(Application)).all()
     metrics=session.scalars(select(JobMetric)).all()
     events=session.scalars(select(ApplicationEvent).order_by(ApplicationEvent.created_at.desc()).limit(80)).all()
-    submitted=sum(1 for s in statuses if s.status=='submitted')
+    submitted_keys=set()
+    for s in statuses:
+        if s.status!='submitted':
+            continue
+        job=session.get(Job,s.job_id)
+        if not job:
+            continue
+        submitted_keys.add(((job.apply_url or "").strip().lower(),(job.company or "").strip().lower(),(job.title or "").strip().lower()))
+    submitted=len(submitted_keys)
     needs=sum(1 for a in apps if a.status=='needs_human')
     failed=sum(1 for a in apps if a.status=='failed')
     avg=round(sum(m.probability for m in metrics)/max(1,len(metrics))) if metrics else 0
