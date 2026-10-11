@@ -690,8 +690,29 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         try:
                             _fill_standard_fields(scope,profile,draft,resume_path)
                             ats_info=fill_ats_fields(scope,page.url,profile,draft,resume_path)
-                            learned_filled.extend(_fill_learned_answers(scope,learned_answers))
+                            learned_now=_fill_learned_answers(scope,learned_answers)
+                            learned_filled.extend(learned_now)
                             sensitive_filled=_fill_explicit_sensitive_answers(scope)
+
+                            # Review answers marked sensitive are explicit,
+                            # one-application user answers. If the form filler
+                            # actually used them, tell the safety checker they
+                            # are satisfied without inferring or reusing them.
+                            used_labels={str(x).strip().lower() for x in learned_now}
+                            for item in learned_answers or []:
+                                if not item.get("sensitive"):continue
+                                label=str(item.get("label") or "").strip()
+                                if label.lower() not in used_labels:continue
+                                low=label.lower()
+                                if "gender" in low and "gender" not in sensitive_filled:
+                                    sensitive_filled.append("gender")
+                                if ("race" in low or "ethnicity" in low) and "race_ethnicity" not in sensitive_filled:
+                                    sensitive_filled.append("race_ethnicity")
+                                if "veteran" in low and "veteran_status" not in sensitive_filled:
+                                    sensitive_filled.append("veteran_status")
+                                if "disability" in low and "disability_status" not in sensitive_filled:
+                                    sensitive_filled.append("disability_status")
+
                             possible=_sensitive_or_unknown_required(scope,sensitive_filled)
                             if possible and blocker is None:blocker=possible
                             found_submit=_find_submit(scope)
