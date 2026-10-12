@@ -398,19 +398,8 @@ def applications(session:Session=Depends(db)):
         .join(Job,Job.id==Application.job_id)
         .order_by(Application.created_at.desc())
     ).all()
-    if os.getenv('GEMINI_API_KEY'):
-        changed=False
-        for item,job in rows:
-            if (item.rationale or '').startswith('Local keyword estimate'):
-                doc=session.get(Document,item.document_id)
-                if job and doc:
-                    score,rationale,draft=ai_prepare(job,doc)
-                    item.score=score
-                    item.rationale=rationale
-                    item.draft=draft
-                    changed=True
-        if changed:
-            session.commit()
+    # Read endpoints must be side-effect free. Fallback scores are refreshed by
+    # the scheduled worker, never by a dashboard page load.
     app_ids=[item.id for item,_ in rows]
     milestone_events=session.scalars(
         select(ApplicationEvent).where(ApplicationEvent.application_id.in_(app_ids))
