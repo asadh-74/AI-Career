@@ -45,6 +45,22 @@ class AutomationConfig:
             auto_submit_browser=yes("AUTO_SUBMIT_BROWSER",False),
         )
 
+_PROFILE_OVERRIDES={}
+SAFE_PROFILE_OVERRIDE_KEYS={
+    "country","city","state_province","address_line1","postal_code",
+    "linkedin","github","portfolio","availability",
+    "salary_expectation_amount","salary_expectation_currency","salary_expectation_period",
+    "work_authorized","requires_sponsorship",
+}
+
+def set_profile_overrides(values):
+    """Set process-local, DB-backed non-sensitive profile facts for browser automation."""
+    global _PROFILE_OVERRIDES
+    if not isinstance(values,dict):
+        _PROFILE_OVERRIDES={}
+        return
+    _PROFILE_OVERRIDES={k:v for k,v in values.items() if k in SAFE_PROFILE_OVERRIDE_KEYS and v not in (None,"")}
+
 def load_profile():
     raw=os.getenv("APPLICANT_PROFILE_JSON","").strip()
     if not raw:return {}
@@ -60,6 +76,7 @@ def load_profile():
         data.setdefault("degree_name","B.E. Electrical Engineering")
         data.setdefault("field_of_study","Electrical Engineering")
         data.setdefault("graduation_year","2027")
+        data.update(_PROFILE_OVERRIDES)
         return data
     except json.JSONDecodeError:return {}
 
@@ -283,6 +300,9 @@ def _fill_verified_profile_questions(page,profile):
     mappings=(
         ("country",r"country(?: of residence)?|current country",profile.get("country") or "Pakistan",()),
         ("city",r"current city|city of residence|^city$",profile.get("city") or "Islamabad",()),
+        ("address_line1",r"address line|street address|first line of your address|address 1",profile.get("address_line1"),()),
+        ("postal_code",r"postal code|post code|postcode|zip code|^zip$",profile.get("postal_code"),()),
+        ("state_province",r"state|province|region",profile.get("state_province"),()),
         ("university",r"university|college|school",profile.get("university"),("NUST",)),
         ("degree",r"degree level|highest degree|degree type|education level",profile.get("degree"),("Bachelor","Bachelors","Bachelor's","Undergraduate")),
         ("degree_name",r"degree name|qualification",profile.get("degree_name"),()),
@@ -409,6 +429,9 @@ def _verified_profile_answer_for_label(label,profile):
         (("portfolio","personal website","website"),"portfolio"),
         (("country",),"country"),
         (("city",),"city"),
+        (("address line","street address","first line of your address","address 1"),"address_line1"),
+        (("postal code","post code","postcode","zip code","zip"),"postal_code"),
+        (("state","province","region"),"state_province"),
         (("university","college"),"university"),
         (("field of study","major","discipline"),"field_of_study"),
         (("degree name","qualification"),"degree_name"),
