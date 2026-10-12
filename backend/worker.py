@@ -191,14 +191,12 @@ def remember_blocker(session,job,reason):
 
 def review_answers_for(session,application_id):
     rows=session.scalars(
-        select(ReviewAnswer).where(
-            ReviewAnswer.application_id==application_id,
-            ReviewAnswer.resolved==False,
-        )
+        select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)
     ).all()
     return [
         {"label":row.label_key,"selector_hint":row.selector_hint,"value":row.answer,"sensitive":row.sensitive}
-        for row in rows if (row.answer or "").strip()
+        for row in rows
+        if (row.answer or "").strip() and (not row.resolved or row.sensitive)
     ]
 
 def store_review_fields(session,application_id,job,result):
