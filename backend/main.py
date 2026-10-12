@@ -1,5 +1,6 @@
 """Career Atlas API: one-user job discovery, document matching and application queue."""
 import io
+import json
 import os
 import re
 import secrets
@@ -545,6 +546,22 @@ def automation_run():
     from worker import run
     return run()
 
+class ApplicantProfileExtraIn(BaseModel):
+    country: str = Field(default='', max_length=100)
+    city: str = Field(default='', max_length=120)
+    state_province: str = Field(default='', max_length=120)
+    address_line1: str = Field(default='', max_length=240)
+    postal_code: str = Field(default='', max_length=40)
+    linkedin: str = Field(default='', max_length=500)
+    github: str = Field(default='', max_length=500)
+    portfolio: str = Field(default='', max_length=500)
+    availability: str = Field(default='', max_length=200)
+    salary_expectation_amount: str = Field(default='', max_length=80)
+    salary_expectation_currency: str = Field(default='', max_length=20)
+    salary_expectation_period: str = Field(default='', max_length=40)
+    work_authorized: bool | None = None
+    requires_sponsorship: bool | None = None
+
 class QualityModeIn(BaseModel):
     mode: str
 
@@ -778,7 +795,8 @@ def v3_update_question(question_id:int,body:QuestionMemoryIn,session:Session=Dep
     if not item: raise HTTPException(404,'Question memory not found')
     if item.sensitive and body.answer_key:
         raise HTTPException(400,'Sensitive questions cannot use normal profile memory')
-    allowed={'','name','email','phone','location','linkedin','github','portfolio','availability','salary','work_authorized','requires_sponsorship'}
+    allowed={'','name','email','phone','location','linkedin','github','portfolio','availability','salary',
+             'work_authorized','requires_sponsorship','country','city','state_province','address_line1','postal_code'}
     if body.answer_key not in allowed: raise HTTPException(400,'Unsupported profile key')
     item.answer_key=body.answer_key
     if body.selector_hint.strip(): item.selector_hint=body.selector_hint.strip()
@@ -917,6 +935,46 @@ def v3_quality(body:QualityModeIn,session:Session=Depends(db)):
     if mode not in ('conservative','balanced','aggressive'): raise HTTPException(400,'Use conservative, balanced, or aggressive')
     set_setting(session,'quality_mode',mode);session.commit()
     return {'qualityMode':mode,'threshold':quality_threshold(session,75)}
+
+
+@app.get('/api/v3/settings/profile', dependencies=[Depends(auth)])
+def v3_profile_settings(session:Session=Depends(db)):
+    try:
+        data=json.loads(get_setting(session,'applicant_profile_extra','{}') or '{}')
+        if not isinstance(data,dict):data={}
+    except Exception:
+        data={}
+    # Protected demographics are intentionally never stored in this reusable profile.
+    return {
+        'country':data.get('country','Pakistan'),
+        'city':data.get('city','Islamabad'),
+        'stateProvince':data.get('state_province',''),
+        'addressLine1':data.get('address_line1',''),
+        'postalCode':data.get('postal_code',''),
+        'linkedin':data.get('linkedin',''),
+        'github':data.get('github',''),
+        'portfolio':data.get('portfolio',''),
+        'availability':data.get('availability',''),
+        'salaryExpectationAmount':data.get('salary_expectation_amount',''),
+        'salaryExpectationCurrency':data.get('salary_expectation_currency',''),
+        'salaryExpectationPeriod':data.get('salary_expectation_period',''),
+        'workAuthorized':data.get('work_authorized',None),
+        'requiresSponsorship':data.get('requires_sponsorship',None),
+    }
+
+@app.post('/api/v3/settings/profile', dependencies=[Depends(auth)])
+def v3_profile_settings_save(body:ApplicantProfileExtraIn,session:Session=Depends(db)):
+    raw=body.model_dump()
+    cleaned={}
+    for key,value in raw.items():
+        if isinstance(value,str):
+            value=value.strip()
+            if value:cleaned[key]=value
+        elif value is not None:
+            cleaned[key]=value
+    set_setting(session,'applicant_profile_extra',json.dumps(cleaned,ensure_ascii=False))
+    session.commit()
+    return {'ok':True,'savedFields':sorted(cleaned.keys())}
 
 @app.get('/api/v3/messages', dependencies=[Depends(auth)])
 def v3_messages(session:Session=Depends(db)):
