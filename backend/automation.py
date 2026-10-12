@@ -866,6 +866,9 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
         with sync_playwright() as p:
             browser=p.chromium.launch(headless=True)
             page=browser.new_page()
+            # Keep a single problematic ATS control from consuming the whole
+            # autonomous batch. Navigation keeps its explicit longer timeout.
+            page.set_default_timeout(5000)
             network_posts=[]
             def _capture_submit_response(response):
                 try:
