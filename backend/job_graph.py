@@ -12,6 +12,7 @@ from automation import (
     find_application_email,
     naturalize_draft,
     send_email_application,
+    generate_verified_application_answers,
 )
 
 
@@ -24,6 +25,7 @@ class ApplicationState(TypedDict, total=False):
     result: dict
     route: str
     learned_answers: list
+    agent_generated_answers: list
 
 
 def _score_gate(state: ApplicationState) -> ApplicationState:
@@ -93,7 +95,64 @@ def _browser_attempt(state: ApplicationState) -> ApplicationState:
         if fallback.get("status") != "failed":
             result = fallback
 
-    return {**state, "route": "review_gate", "result": result}
+    return {**state, "route": "agent_repair", "result": result}
+
+
+def _agent_repair(state: ApplicationState) -> ApplicationState:
+    """Give LangGraph one autonomous, evidence-grounded repair pass.
+
+    The agent only answers non-sensitive fields that can be supported by the
+    verified resume/profile. Anything legal, protected, unknown, or prohibited
+    by the employer remains for human review.
+    """
+    result=state.get("result") or {}
+    if result.get("status")!="needs_human":
+        return {**state,"route":"review_gate","result":result}
+
+    fields=result.get("review_fields") or []
+    if not fields:
+        return {**state,"route":"review_gate","result":result}
+
+    job,doc,cfg=state["job"],state["doc"],state["cfg"]
+    generated=generate_verified_application_answers(
+        job,
+        getattr(doc,"extracted_text",""),
+        naturalize_draft(job,state.get("draft","")),
+        fields,
+    )
+    if not generated:
+        return {**state,"route":"review_gate","result":result}
+
+    combined=list(state.get("learned_answers") or [])
+    existing={(str(x.get("label") or "").strip().lower()) for x in combined}
+    for item in generated:
+        key=str(item.get("label") or "").strip().lower()
+        if key and key not in existing:
+            combined.append(item);existing.add(key)
+
+    retry=apply_with_playwright(
+        job.apply_url,
+        doc.pdf,
+        doc.filename,
+        naturalize_draft(job,state.get("draft","")),
+        combined,
+    )
+    if retry.get("status")=="failed":
+        fallback=apply_with_selenium(job.apply_url,doc.pdf,doc.filename,naturalize_draft(job,state.get("draft","")))
+        if fallback.get("status")!="failed":
+            retry=fallback
+
+    meta=dict(retry.get("meta") or {})
+    meta["agentGeneratedFields"]=[str(x.get("label") or "")[:240] for x in generated]
+    meta["agentGeneratedCount"]=len(generated)
+    retry["meta"]=meta
+    return {
+        **state,
+        "route":"review_gate",
+        "learned_answers":combined,
+        "agent_generated_answers":generated,
+        "result":retry,
+    }
 
 
 def _review_gate(state: ApplicationState) -> ApplicationState:
@@ -121,6 +180,7 @@ _builder = StateGraph(ApplicationState)
 _builder.add_node("score_gate", _score_gate)
 _builder.add_node("email", _email_attempt)
 _builder.add_node("browser", _browser_attempt)
+_builder.add_node("agent_repair", _agent_repair)
 _builder.add_node("review_gate", _review_gate)
 _builder.set_entry_point("score_gate")
 _builder.add_conditional_edges(
@@ -133,7 +193,8 @@ _builder.add_conditional_edges(
     _route_after_email,
     {"stop": END, "browser": "browser"},
 )
-_builder.add_edge("browser", "review_gate")
+_builder.add_edge("browser", "agent_repair")
+_builder.add_edge("agent_repair", "review_gate")
 _builder.add_edge("review_gate", END)
 APPLICATION_GRAPH = _builder.compile()
 
