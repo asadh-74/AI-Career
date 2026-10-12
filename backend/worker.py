@@ -497,6 +497,9 @@ def ensure_priority_sources(session):
         ("Motive","Greenhouse","gomotive"),
         ("Whippy","Ashby","whippy"),
         ("Enveritas","Greenhouse","enveritas"),
+        ("Camunda","Ashby","camunda"),
+        ("Supabase","Ashby","supabase"),
+        ("fal","Ashby","fal-ai"),
     )
     added=0
     for company,provider,slug in specs:
@@ -573,10 +576,10 @@ def run(target_job_id_override=None):
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
-            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(400)).all()
+            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(900)).all()
             direct=session.scalars(
                 select(Job).where(Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")))
-                .order_by(Job.found_at.desc()).limit(350)
+                .order_by(Job.found_at.desc()).limit(900)
             ).all()
             by_id={j.id:j for j in recent}
             for j in direct:by_id.setdefault(j.id,j)
@@ -592,7 +595,7 @@ def run(target_job_id_override=None):
                 metric=upsert_metric(session,candidate,doc,profile,base)
                 probability[candidate.id]=metric.probability
             recent.sort(key=lambda j:(direct_apply_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
-            jobs=strategy_select(recent,160)
+            jobs=strategy_select(recent,320)
             session.flush()
 
         # Applications for which the user answered only the missing review
@@ -601,6 +604,7 @@ def run(target_job_id_override=None):
             select(Job).join(Application,Application.job_id==Job.id)
             .where(Application.status=="ready_for_retry")
             .order_by(Application.created_at.asc())
+            .limit(5)
         ).all()
         if retry_jobs:
             seen=set();ordered=[]
@@ -608,7 +612,7 @@ def run(target_job_id_override=None):
                 if candidate and candidate.id not in seen:
                     ordered.append(candidate);seen.add(candidate.id)
             jobs=ordered
-        max_to_score=max(50,min(120,cfg.daily_limit*10))
+        max_to_score=max(100,min(300,cfg.daily_limit*12))
 
         pkt=ZoneInfo("Asia/Karachi");now_pkt=datetime.now(pkt)
         day_start_utc=now_pkt.replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc)
