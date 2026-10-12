@@ -606,6 +606,12 @@ def v3_dashboard(session:Session=Depends(db)):
         e.application_id for e in milestone_rows
         if e.event_type=="attempt_started"
     })
+    agent_autofilled=len({
+        e.application_id for e in milestone_rows
+        if e.event_type in {"agent_autofill","review_autofill","review_memory_reused"}
+    })
+    attempt_times=[e.created_at for e in milestone_rows if e.event_type=="attempt_started"]
+    last_agent_attempt=max(attempt_times).isoformat() if attempt_times else None
     submitted_job_ids={s.job_id for s in statuses if s.status=="submitted"}
     employer_confirmed=len({
         e.application_id for e in milestone_rows
@@ -628,6 +634,8 @@ def v3_dashboard(session:Session=Depends(db)):
         'submitted':submitted,
         'answersSaved':answers_saved,
         'submissionAttempted':submission_attempted,
+        'agentAutofilled':agent_autofilled,
+        'lastAgentAttemptAt':last_agent_attempt,
         'employerConfirmed':employer_confirmed,
         'needsAction':needs,
         'needsAttention':needs,
