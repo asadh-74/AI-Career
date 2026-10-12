@@ -297,14 +297,28 @@ def ai_prepare(job,doc):
         score=35
         score+=min(20,role_hits*10)
         score+=min(35,len(matched)*5)
-        # Reward broadly relevant engineering roles even when the posting is verbose.
-        if any(x in job.title.lower() for x in ('junior','entry','graduate','associate')): score+=5
-        # Avoid inflating obviously senior roles during API fallback.
+        # Reward genuinely early-career roles.
+        if any(x in job.title.lower() for x in ('junior','entry','graduate','associate','intern')): score+=8
+        # Avoid inflating senior roles even when the title itself is vague.
         if any(x in job.title.lower() for x in ('senior','staff','principal','director','lead ')): score-=25
+        req_years=[]
+        for pattern in (
+            r'(?:minimum of|at least|minimum)\s+(\d+)\+?\s+years',
+            r'(\d+)\+\s+years',
+            r'(\d+)\s*(?:-|to)\s*\d+\s+years',
+        ):
+            req_years.extend(int(x) for x in re.findall(pattern,hay,re.I))
+        max_req=max(req_years) if req_years else 0
+        current_student=bool(re.search(r'expected\s+2027|graduat(?:ion|ing).*2027|student',cv,re.I))
+        if max_req>=4 and current_student:
+            score-=35
+        elif max_req>=3 and current_student:
+            score-=20
         score=max(0,min(85,score))
+        exp_note=(f' Explicit requirement detected: {max_req}+ years; current resume indicates an early-career/student profile.' if max_req>=3 and current_student else '')
         rationale=(f'Local weighted estimate ({reason}). Role groups matched: {role_hits}; '
-                   f'core stack overlap: {", ".join(matched[:12]) if matched else "none"}. '
-                   'This fallback uses verified resume skills and does not infer missing experience.')
+                   f'core stack overlap: {", ".join(matched[:12]) if matched else "none"}.{exp_note} '
+                   'This fallback uses verified resume evidence and does not invent missing experience.')
         draft=f'Dear Hiring Team,\n\nI am interested in the {job.title} position at {job.company}. My attached resume describes my experience and projects. I would appreciate the opportunity to discuss how my background fits this role.\n\nSincerely'
         return score,rationale,draft
     if not key:return local_match('Gemini API key is not configured')
@@ -357,7 +371,10 @@ def ai_prepare(job,doc):
             return local_match(f'Gemini HTTP {r.status_code}: {hint}')
         try:
             out=json.loads(r.json()['candidates'][0]['content']['parts'][0]['text'])
-            return max(0,min(100,int(out['score']))),str(out['rationale'])[:1500],str(out['draft'])[:4000]
+            score=max(0,min(100,int(out['score'])))
+            if out.get('eligible') is False:
+                score=min(score,50)
+            return score,str(out['rationale'])[:1500],str(out['draft'])[:4000]
         except (KeyError,ValueError,TypeError,IndexError,json.JSONDecodeError):
             last_error=f'Gemini {model} returned an unreadable response'
             continue
