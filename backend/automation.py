@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from ats_adapters import ats_name, fill_ats_fields, application_root
 from canonical_resume import CANONICAL_RESUME_TEXT
+from form_intelligence import fill_answer, unresolved_required, fill_phone_country, clean_question
 
 SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity","religion","religious",
 "assessment","test","captcha")
@@ -325,6 +326,8 @@ def _fill_standard_fields(page,profile,draft,resume_path):
     country=profile.get("country") or ("Pakistan" if "pakistan" in str(profile.get("location","")).lower() else "")
     if country:
         _select_known_answer(page,r"country|current country|country of residence",country)
+        _select_or_fill_labeled(page,r"country|current country|country of residence",country,(country,))
+        fill_phone_country(page,country)
     _fill_verified_profile_questions(page,profile)
 
     _answer_boolean(page,r"authorized to work|work authorization|legally authorized",profile.get("work_authorized"))
@@ -368,40 +371,10 @@ def _fill_learned_answers(page,learned_answers):
     for item in learned_answers or []:
         value=item.get("value")
         if value in (None,""):continue
-        selector=item.get("selector_hint") or ""
         label=item.get("label") or ""
+        selector=item.get("selector_hint") or ""
         try:
-            if selector:
-                loc=page.locator(selector)
-                if loc.count() and loc.first.is_visible():
-                    tag=loc.first.evaluate("(el)=>el.tagName.toLowerCase()")
-                    typ=(loc.first.get_attribute("type") or "").lower()
-                    if tag=="select":
-                        try:loc.first.select_option(label=re.compile(rf"^{re.escape(str(value))}$",re.I));filled.append(label);continue
-                        except Exception:pass
-                    if typ in ("checkbox","radio"):
-                        if bool(value):loc.first.check();filled.append(label);continue
-                    loc.first.fill(str(value));filled.append(label);continue
-            if label:
-                try:
-                    labeled=page.get_by_label(re.compile(re.escape(label),re.I))
-                    for i in range(min(labeled.count(),6)):
-                        fld=labeled.nth(i)
-                        typ=(fld.get_attribute("type") or "").lower()
-                        if typ in ("checkbox","radio"):
-                            truthy=(value is True) or str(value).strip().lower() in {"1","true","yes","y","on","selected","check"}
-                            if truthy and not fld.is_checked():
-                                fld.check()
-                            if truthy:
-                                filled.append(label)
-                                break
-                    if label in filled:continue
-                except Exception:pass
-            if label and _select_known_answer(page,re.escape(label),value):
-                filled.append(label);continue
-            if label and _select_or_fill_labeled(page,re.escape(label),value):
-                filled.append(label);continue
-            if label and _fill(page,re.escape(label),value):
+            if fill_answer(page,label,value,selector):
                 filled.append(label)
         except Exception:
             pass
@@ -656,6 +629,11 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
                 continue
             blockers.append(f"Sensitive/uncertain question: {text[:180]}")
 
+    structured=unresolved_required(root,needs_human)
+    for item in structured:
+        prefix="Sensitive/uncertain question: " if item.get("sensitive") else "Unknown required field: "
+        blockers.append(prefix+clean_question(item.get("label") or ""))
+
     required=root.locator("input[required], textarea[required], select[required]")
     safe_tokens=("name","email","phone","mobile","location","city","country","linkedin","github","portfolio","website",
                  "resume","cv","cover","message","additional","authorization","authorized","sponsorship","salary",
@@ -686,6 +664,8 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
                 field.get_attribute("aria-label"),field.get_attribute("data-testid"),
             ])).lower()
             if "newsletter" in ident:continue
+            if any(clean_question(item.get("label") or "").lower()==clean_question(ident).lower() for item in structured):
+                continue
             if not any(tok in ident for tok in safe_tokens):
                 visible_label=""
                 try:
