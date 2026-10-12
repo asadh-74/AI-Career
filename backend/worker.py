@@ -19,6 +19,7 @@ from research_agents import crew_research
 from resume_tailor import build_tailored_resume
 from email_monitor import fetch_recent_messages, match_application
 from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION, build_canonical_resume_pdf
+from form_intelligence import clean_question
 from v3_models import (
     ApplicationArtifact, ApplicationEvent, EmployerMessage, FollowUpDraft,
     InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant, ReviewAnswer,
@@ -306,6 +307,36 @@ def review_requires_user(session,application_id):
         if row.sensitive or any(token in low for token in hard_patterns):
             return True
     return False
+
+def reuse_review_answers(session,application_id):
+    """Reuse only prior explicit non-sensitive answers for the same normalized question."""
+    current=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application_id,
+        ReviewAnswer.resolved==False,
+        ReviewAnswer.sensitive==False,
+    )).all()
+    if not current:return 0
+    prior=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id!=application_id,
+        ReviewAnswer.sensitive==False,
+        ReviewAnswer.answer!="",
+    ).order_by(ReviewAnswer.updated_at.desc()).limit(600)).all()
+    memory={}
+    for row in prior:
+        key=clean_question(row.label_key or "").lower()
+        if key and key not in memory:
+            memory[key]=row.answer
+    reused=0
+    for row in current:
+        if (row.answer or "").strip():continue
+        key=clean_question(row.label_key or "").lower()
+        value=memory.get(key)
+        if value:
+            row.answer=value
+            row.updated_at=datetime.now(timezone.utc)
+            reused+=1
+    if reused:session.flush()
+    return reused
 
 def resolve_review_fields(session,application_id):
     rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
@@ -857,6 +888,11 @@ def run(target_job_id_override=None):
                 questions=result.get("review_fields") or extract_review_questions(result.get("reason",""))
                 if questions:
                     store_review_fields(session,existing.id,job,result)
+                    reused_count=reuse_review_answers(session,existing.id)
+                    if reused_count:
+                        record_event(session,job.id,"applying","review_memory_reused",
+                                     f"Reused {reused_count} prior approved non-sensitive answer(s).",
+                                     application_id=existing.id)
                     rows=session.scalars(select(ReviewAnswer).where(
                         ReviewAnswer.application_id==existing.id,
                         ReviewAnswer.resolved==False,
