@@ -534,10 +534,10 @@ class _WorkspaceState extends State<Workspace> {
   Widget submittedView()=>Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
     Row(children:[
       Expanded(child:Text('Submitted Applications',style:Theme.of(context).textTheme.headlineSmall)),
-      Chip(label:Text('${submittedApps.length} confirmed'))
+      Chip(label:Text('${submittedApps.length} submitted records'))
     ]),
     const SizedBox(height:6),
-    const Text('Only applications with a confirmed submission status and receipt appear here.'),
+    const Text('This tab includes automatic and user-confirmed submitted records. Use Employer Confirmed on the dashboard for ATS-confirmed receipts only.'),
     const SizedBox(height:12),
     Expanded(child:submittedApps.isEmpty
       ? const Center(child:Text('No confirmed submissions yet.'))
