@@ -121,6 +121,32 @@ def title_relevant(title:str)->bool:
     return any(x in t for x in TARGET_TITLE_TERMS)
 AGGREGATOR_PROVIDERS={"wwr","arbeitnow","remotive","jobicy","remoteok","himalayas"}
 
+def _title_tokens(title):
+    return {
+        x for x in re.findall(r"[a-z0-9+#.]+",(title or "").lower())
+        if x not in {"the","a","an","and","or","of","for","to","remote","engineer","engineering"}
+    }
+
+def prefer_direct_duplicate(session,job):
+    """Replace an aggregator copy with a matching direct ATS job when available."""
+    if (job.provider or "").lower() not in AGGREGATOR_PROVIDERS:
+        return job
+    company=(job.company or "").strip()
+    if not company:return job
+    direct=session.scalars(select(Job).where(
+        Job.company==company,
+        Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")),
+    )).all()
+    target=_title_tokens(job.title)
+    best=None;best_score=0.0
+    for candidate in direct:
+        other=_title_tokens(candidate.title)
+        if not target or not other:continue
+        score=len(target & other)/max(1,len(target | other))
+        if score>best_score:
+            best_score=score;best=candidate
+    return best if best is not None and best_score>=0.55 else job
+
 def direct_apply_priority(job)->int:
     """Prefer direct forms that Career Atlas can complete reliably."""
     host=(urlparse(job.apply_url or "").hostname or "").lower()
@@ -738,6 +764,14 @@ def run(target_job_id_override=None):
                 probability[candidate.id]=metric.probability
             recent.sort(key=lambda j:(candidate_fit_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
             jobs=strategy_select(recent,320)
+            # Aggregator listings are discovery sources, not ideal application
+            # surfaces. Prefer a matching employer ATS copy before browser work.
+            direct_jobs=[];seen_direct=set()
+            for candidate in jobs:
+                chosen=prefer_direct_duplicate(session,candidate)
+                if chosen and chosen.id not in seen_direct:
+                    direct_jobs.append(chosen);seen_direct.add(chosen.id)
+            jobs=direct_jobs
             session.flush()
 
         # Applications that are already prepared and safe for autonomous
