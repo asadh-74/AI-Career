@@ -285,8 +285,23 @@ def cleanup_false_review_fields(session):
             row.updated_at=datetime.now(timezone.utc)
             fixed+=1
         elif low.startswith("funanswer funanswer"):
-            row.label_key="There are no wrong answers — we just want to see how you think."
-            row.updated_at=datetime.now(timezone.utc)
+            canonical_label="There are no wrong answers — we just want to see how you think."
+            with session.no_autoflush:
+                existing=session.scalar(select(ReviewAnswer).where(
+                    ReviewAnswer.application_id==row.application_id,
+                    ReviewAnswer.label_key==canonical_label,
+                    ReviewAnswer.id!=row.id,
+                ))
+            if existing:
+                if not (existing.answer or "").strip() and (row.answer or "").strip():
+                    existing.answer=row.answer
+                existing.updated_at=datetime.now(timezone.utc)
+                row.resolved=True
+                row.answer=""
+                row.updated_at=datetime.now(timezone.utc)
+            else:
+                row.label_key=canonical_label
+                row.updated_at=datetime.now(timezone.utc)
     if fixed:session.flush()
     return fixed
 
