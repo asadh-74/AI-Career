@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text, UniqueConstraint, select
+from form_intelligence import clean_question
 from sqlalchemy.orm import Mapped, mapped_column
 
 from main import Base
@@ -157,8 +158,12 @@ def extract_review_questions(reason:str)->list[dict]:
             or 'tabindex="-1"' in raw_low or "tabindex='-1'" in raw_low
             or "requiredinput" in raw_low):
             continue
-        text=re.sub(r"<[^>]+>"," ",raw)
-        text=re.sub(r"\s+"," ",text).strip()
+        selector_hint=""
+        m_name=re.search(r'name=["\']([^"\']+)["\']',raw,re.I)
+        m_id=re.search(r'id=["\']([^"\']+)["\']',raw,re.I)
+        if m_id:selector_hint=f"#{m_id.group(1)}"
+        elif m_name:selector_hint=f'[name="{m_name.group(1)}"]'
+        text=clean_question(raw)
         if not text:continue
         # Strip noisy whole-page prefixes from validation diagnostics.
         for marker in ("LinkedIn Profile","Do you currently","What is your","Have you","Country","Phone","Email","First Name","Last Name"):
@@ -170,7 +175,7 @@ def extract_review_questions(reason:str)->list[dict]:
         key=normalize_text(text)
         if not key or key in seen:continue
         seen.add(key)
-        out.append({"label":text,"sensitive":review_question_is_sensitive(text)})
+        out.append({"label":text,"sensitive":review_question_is_sensitive(text),"selector_hint":selector_hint})
     return out
 
 def normalize_text(v:str)->str:
