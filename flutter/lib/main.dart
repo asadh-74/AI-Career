@@ -492,6 +492,7 @@ class _WorkspaceState extends State<Workspace> {
         case 'attempted': return milestones['submissionAttempted']==true;
         case 'confirmed': return milestones['employerConfirmed']==true;
         case 'needs_action': return milestones['needsAction']==true;
+        case 'technical_blocked': return milestones['technicalBlocked']==true;
         default: return true;
       }
     }
@@ -538,6 +539,7 @@ class _WorkspaceState extends State<Workspace> {
         ChoiceChip(label:Text('Submission attempted (${dashboard['submissionAttempted']??0})'),selected:applicationView=='attempted',onSelected:(_)=>setState(()=>applicationView='attempted')),
         ChoiceChip(label:Text('Employer confirmed (${dashboard['employerConfirmed']??0})'),selected:applicationView=='confirmed',onSelected:(_)=>setState(()=>applicationView='confirmed')),
         ChoiceChip(label:Text('Needs action (${dashboard['needsAction']??reviewApps.length})'),selected:applicationView=='needs_action',onSelected:(_)=>setState(()=>applicationView='needs_action')),
+        ChoiceChip(label:Text('Technical blocked (${dashboard['technicalBlocked']??0})'),selected:applicationView=='technical_blocked',onSelected:(_)=>setState(()=>applicationView='technical_blocked')),
         OutlinedButton.icon(onPressed:locateSubmittedApplication,icon:const Icon(Icons.link),label:const Text('Paste confirmation URL')),
       ]),
       if(needle.isNotEmpty)Padding(
@@ -546,7 +548,7 @@ class _WorkspaceState extends State<Workspace> {
       ),
       const SizedBox(height:10),
       Expanded(child:visible.isEmpty
-        ? Center(child:Text(applicationView=='needs_action'?'No applications currently need action.':'No applications in this view.'))
+        ? Center(child:Text(applicationView=='needs_action'?'No applications currently need action.':applicationView=='technical_blocked'?'No applications are technically blocked.':'No applications in this view.'))
         : ListView(children:[
           ...visible.map((item){
             final a=item as Map;
@@ -648,6 +650,7 @@ class _WorkspaceState extends State<Workspace> {
       _statCard('Agent Autofilled',dashboard['agentAutofilled'],Icons.auto_awesome),
       _statCard('Employer Confirmed',dashboard['employerConfirmed'],Icons.verified_outlined,onTap:()=>setState((){applicationView='confirmed';tab=1;})),
       _statCard('Needs Action',dashboard['needsAction'],Icons.warning_amber_outlined,onTap:()=>setState((){applicationView='needs_action';tab=1;})),
+      _statCard('Technical Blocked',dashboard['technicalBlocked'],Icons.build_circle_outlined,onTap:()=>setState((){applicationView='technical_blocked';tab=1;})),
       _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
     ]),
     const SizedBox(height:18),
