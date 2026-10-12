@@ -99,61 +99,71 @@ def _browser_attempt(state: ApplicationState) -> ApplicationState:
 
 
 def _agent_repair(state: ApplicationState) -> ApplicationState:
-    """Give LangGraph one autonomous, evidence-grounded repair pass.
+    """Run several bounded evidence-grounded repair rounds before human review.
 
-    The agent only answers non-sensitive fields that can be supported by the
-    verified resume/profile. Anything legal, protected, unknown, or prohibited
-    by the employer remains for human review.
+    Each round re-opens the application using all answers learned so far. The
+    generator is still forbidden from inventing protected/legal/unknown facts.
     """
     result=state.get("result") or {}
     if result.get("status")!="needs_human":
         return {**state,"route":"review_gate","result":result}
 
-    fields=result.get("review_fields") or []
-    if not fields:
-        return {**state,"route":"review_gate","result":result}
-
     job,doc,cfg=state["job"],state["doc"],state["cfg"]
-    generated=generate_verified_application_answers(
-        job,
-        getattr(doc,"extracted_text",""),
-        naturalize_draft(job,state.get("draft","")),
-        fields,
-    )
-    if not generated:
-        return {**state,"route":"review_gate","result":result}
-
     combined=list(state.get("learned_answers") or [])
-    existing={(str(x.get("label") or "").strip().lower()) for x in combined}
-    for item in generated:
-        key=str(item.get("label") or "").strip().lower()
-        if key and key not in existing:
-            combined.append(item);existing.add(key)
+    all_generated=[]
+    seen={(str(x.get("label") or "").strip().lower()) for x in combined}
+    repair_rounds=0
 
-    retry=apply_with_playwright(
-        job.apply_url,
-        doc.pdf,
-        doc.filename,
-        naturalize_draft(job,state.get("draft","")),
-        combined,
-    )
-    if retry.get("status")=="failed":
-        fallback=apply_with_selenium(job.apply_url,doc.pdf,doc.filename,naturalize_draft(job,state.get("draft","")))
-        if fallback.get("status")!="failed":
-            retry=fallback
+    for _ in range(3):
+        if result.get("status")!="needs_human":
+            break
+        fields=result.get("review_fields") or []
+        if not fields:
+            break
+        generated=generate_verified_application_answers(
+            job,
+            getattr(doc,"extracted_text",""),
+            naturalize_draft(job,state.get("draft","")),
+            fields,
+        )
+        fresh=[]
+        for item in generated:
+            key=str(item.get("label") or "").strip().lower()
+            if key and key not in seen:
+                combined.append(item)
+                fresh.append(item)
+                all_generated.append(item)
+                seen.add(key)
+        if not fresh:
+            break
+        repair_rounds+=1
+        result=apply_with_playwright(
+            job.apply_url,
+            doc.pdf,
+            doc.filename,
+            naturalize_draft(job,state.get("draft","")),
+            combined,
+        )
+        if result.get("status")=="failed":
+            fallback=apply_with_selenium(
+                job.apply_url,doc.pdf,doc.filename,
+                naturalize_draft(job,state.get("draft",""))
+            )
+            if fallback.get("status")!="failed":
+                result=fallback
 
-    meta=dict(retry.get("meta") or {})
-    meta["agentGeneratedFields"]=[str(x.get("label") or "")[:240] for x in generated]
-    meta["agentGeneratedCount"]=len(generated)
-    retry["meta"]=meta
+    meta=dict(result.get("meta") or {})
+    meta["agentGeneratedFields"]=[str(x.get("label") or "")[:240] for x in all_generated]
+    meta["agentGeneratedCount"]=len(all_generated)
+    meta["agentRepairRounds"]=repair_rounds
+    result["meta"]=meta
     return {
         **state,
         "route":"review_gate",
         "learned_answers":combined,
-        "agent_generated_answers":generated,
-        "result":retry,
+        "agent_generated_answers":all_generated,
+        "result":result,
     }
-
 
 def _review_gate(state: ApplicationState) -> ApplicationState:
     """Persist an explicit human-review state without losing browser progress."""
