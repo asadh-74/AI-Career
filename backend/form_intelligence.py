@@ -79,14 +79,30 @@ def field_label(scope,field)->str:
                 if txt:candidates.append(txt)
     except Exception:pass
     try:
-        # Ashby commonly places the question in the nearest container above a
-        # UUID-named input.
+        # Modern ATSs often use opaque names (UUIDs/cards[field0]) while the
+        # human question lives in nearby text nodes. Inspect several ancestors
+        # and prefer concise label/legend/question text from each container.
         node=field
-        for _ in range(4):
+        for _ in range(6):
             node=node.locator("xpath=..")
+            try:
+                pieces=node.locator("label, legend, [aria-label], [class*='label' i], [class*='question' i], p, span")
+                for j in range(min(pieces.count(),30)):
+                    txt=(pieces.nth(j).inner_text(timeout=250) or "").strip()
+                    txt=re.sub(r"\s+"," ",txt)
+                    if 3<=len(txt)<=320:candidates.append(txt)
+            except Exception:pass
             txt=(node.inner_text(timeout=400) or "").strip()
             txt=re.sub(r"\s+"," ",txt)
             if txt and len(txt)<=600:candidates.append(txt)
+    except Exception:pass
+    try:
+        # Some Lever/custom forms render the question immediately before the
+        # input without a <label for=...> relationship.
+        prev=field.locator("xpath=preceding-sibling::*[1]")
+        if prev.count():
+            txt=(prev.first.inner_text(timeout=400) or "").strip()
+            if txt:candidates.append(txt)
     except Exception:pass
     try:
         placeholder=(field.get_attribute("placeholder") or "").strip()
@@ -100,6 +116,9 @@ def field_label(scope,field)->str:
         if not q:continue
         if UUID_RE.match(q):continue
         if q.lower() in {"type here...","type here","select..."}:continue
+        # Opaque ATS implementation names are not applicant questions.
+        if re.fullmatch(r"cards\[[^\]]+\]\[field\d+\]",q,re.I):continue
+        if re.fullmatch(r"(?:field|question)[-_]?\d+",q,re.I):continue
         if q not in cleaned:cleaned.append(q)
     # Prefer concise question-like labels over whole container text.
     cleaned.sort(key=lambda x:(0 if ("?" in x or "*" in x) else 1,len(x)))
