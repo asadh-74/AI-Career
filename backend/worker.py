@@ -63,6 +63,51 @@ def remote_eligible(job)->bool:
         return True
     return False
 
+def location_eligible(job,profile)->bool:
+    """Reject region-locked remote roles that do not include the applicant country."""
+    loc=(getattr(job,"location","") or "").strip().lower()
+    desc=(getattr(job,"description","") or "").lower()[:3500]
+    country=str(profile.get("country") or "Pakistan").strip().lower()
+    if not loc:
+        return True
+    if any(x in loc for x in ("worldwide","anywhere","global")):
+        return True
+    if country and country in loc:
+        return True
+    if country=="pakistan" and any(x in loc for x in ("apac","asia","south asia")):
+        return True
+    restricted=(
+        ("united states","usa","u.s.","us only","remote - us","remote, us"),
+        ("canada",),("mexico",),("united kingdom","uk only","remote - uk"),
+        ("europe only","eu only","european union"),("latam","latin america"),
+        ("emea",),("australia",),("new zealand",),
+    )
+    if any(any(token in loc for token in group) for group in restricted):
+        return False
+    # A generic "Remote" location is acceptable unless the description clearly
+    # requires residence in another named region.
+    if loc in {"remote","remote work","remote / remote","fully remote"} or loc.startswith("remote"):
+        hard_phrases=("must be based in","must reside in","candidates must be located in","only candidates in","remote within")
+        if any(p in desc for p in hard_phrases):
+            if country and country in desc:return True
+            if country=="pakistan" and any(x in desc for x in ("apac","asia","south asia")):return True
+            if any(x in desc for x in ("united states"," usa ","canada","united kingdom"," uk ","european union","emea","latam","australia")):
+                return False
+        return True
+    return True
+
+def candidate_fit_priority(job)->int:
+    """Cheap ordering heuristic; final application still requires the >=65 matcher."""
+    title=(job.title or "").lower()
+    loc=(job.location or "").lower()
+    score=direct_apply_priority(job)*100
+    if any(x in title for x in ("junior","graduate","entry","associate","intern")):score+=90
+    if any(x in title for x in ("backend","python","api engineer")):score+=60
+    if any(x in title for x in ("ai engineer","machine learning","ml engineer","automation","agentic")):score+=50
+    if any(x in title for x in ("full stack","full-stack","fullstack","web developer")):score+=30
+    if any(x in loc for x in ("worldwide","global","anywhere","pakistan","apac","asia")):score+=35
+    return score
+
 def title_relevant(title:str)->bool:
     t=(title or "").lower()
     excluded=("director","vice president","vp ","head of ","principal","staff engineer","engineering manager",
@@ -653,7 +698,7 @@ def run(target_job_id_override=None):
                 base=int(existing_app.score) if existing_app else 50
                 metric=upsert_metric(session,candidate,doc,profile,base)
                 probability[candidate.id]=metric.probability
-            recent.sort(key=lambda j:(direct_apply_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
+            recent.sort(key=lambda j:(candidate_fit_priority(j),probability.get(j.id,0),j.found_at),reverse=True)
             jobs=strategy_select(recent,320)
             session.flush()
 
@@ -714,6 +759,7 @@ def run(target_job_id_override=None):
 
             if stats["applied"]>=remaining_today or stats["processed"]>=max_attempts or stats["scored"]>=max_to_score:break
             if cfg.remote_only and not remote_eligible(job):continue
+            if not location_eligible(job,profile):continue
             stats["remoteEligible"]+=1
             if not title_relevant(job.title):continue
             stats["titleRelevant"]+=1
@@ -729,7 +775,10 @@ def run(target_job_id_override=None):
 
             research=research_job(session,job,profile)
             if research.quality_score<45:
-                record_event(session,job.id,"discovered","research_skip",research.eligibility_notes);session.commit();continue
+                # Research is advisory. The primary matcher and verified
+                # eligibility checks decide whether the agent may apply.
+                record_event(session,job.id,"discovered","research_low",
+                             research.eligibility_notes,application_id=(pre_existing.id if pre_existing else None))
 
             force_rescore=os.getenv("FORCE_RESCORE","false").lower() in {"1","true","yes","on"}
             scored_v2=False
