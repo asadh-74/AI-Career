@@ -157,6 +157,74 @@ class _WorkspaceState extends State<Workspace> {
       ],
     )));
   }
+  Future<void> editApplicationProfile() async {
+    try{
+      final raw=await api.request('GET','v3/settings/profile');
+      final data=Map<String,dynamic>.from(raw as Map);
+      final country=TextEditingController(text:(data['country']??'').toString());
+      final city=TextEditingController(text:(data['city']??'').toString());
+      final state=TextEditingController(text:(data['stateProvince']??'').toString());
+      final address=TextEditingController(text:(data['addressLine1']??'').toString());
+      final postal=TextEditingController(text:(data['postalCode']??'').toString());
+      final availability=TextEditingController(text:(data['availability']??'').toString());
+      final linkedin=TextEditingController(text:(data['linkedin']??'').toString());
+      final github=TextEditingController(text:(data['github']??'').toString());
+      final portfolio=TextEditingController(text:(data['portfolio']??'').toString());
+      String auth=data['workAuthorized']==true?'yes':data['workAuthorized']==false?'no':'';
+      String sponsor=data['requiresSponsorship']==true?'yes':data['requiresSponsorship']==false?'no':'';
+      if(!mounted)return;
+      await showDialog(context:context,builder:(d)=>StatefulBuilder(builder:(d,setLocal)=>AlertDialog(
+        title:const Text('Application Profile Vault'),
+        content:SizedBox(width:680,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+          const Text('Reusable factual fields only. Protected demographics are never stored here.'),
+          const SizedBox(height:10),
+          TextField(controller:country,decoration:const InputDecoration(labelText:'Country')),
+          TextField(controller:city,decoration:const InputDecoration(labelText:'City')),
+          TextField(controller:state,decoration:const InputDecoration(labelText:'State / province')),
+          TextField(controller:address,decoration:const InputDecoration(labelText:'Address line 1')),
+          TextField(controller:postal,decoration:const InputDecoration(labelText:'Postal code')),
+          TextField(controller:availability,decoration:const InputDecoration(labelText:'Availability')),
+          TextField(controller:linkedin,decoration:const InputDecoration(labelText:'LinkedIn')),
+          TextField(controller:github,decoration:const InputDecoration(labelText:'GitHub')),
+          TextField(controller:portfolio,decoration:const InputDecoration(labelText:'Portfolio')),
+          const SizedBox(height:8),
+          DropdownButtonFormField<String>(
+            value:auth,decoration:const InputDecoration(labelText:'Work authorization (only if you know the answer)'),
+            items:const [
+              DropdownMenuItem(value:'',child:Text('Not set')),
+              DropdownMenuItem(value:'yes',child:Text('Yes')),
+              DropdownMenuItem(value:'no',child:Text('No')),
+            ],onChanged:(v)=>setLocal(()=>auth=v??''),
+          ),
+          DropdownButtonFormField<String>(
+            value:sponsor,decoration:const InputDecoration(labelText:'Requires sponsorship'),
+            items:const [
+              DropdownMenuItem(value:'',child:Text('Not set')),
+              DropdownMenuItem(value:'yes',child:Text('Yes')),
+              DropdownMenuItem(value:'no',child:Text('No')),
+            ],onChanged:(v)=>setLocal(()=>sponsor=v??''),
+          ),
+        ]))),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(d),child:const Text('Cancel')),
+          FilledButton.icon(onPressed:()async{
+            final payload=<String,dynamic>{
+              'country':country.text.trim(),'city':city.text.trim(),'state_province':state.text.trim(),
+              'address_line1':address.text.trim(),'postal_code':postal.text.trim(),
+              'availability':availability.text.trim(),'linkedin':linkedin.text.trim(),
+              'github':github.text.trim(),'portfolio':portfolio.text.trim(),
+              'work_authorized':auth.isEmpty?null:auth=='yes',
+              'requires_sponsorship':sponsor.isEmpty?null:sponsor=='yes',
+            };
+            await api.request('POST','v3/settings/profile',payload);
+            if(d.mounted)Navigator.pop(d);
+            message('Application profile saved. Agents will reuse these factual fields automatically.');
+          },icon:const Icon(Icons.save_outlined),label:const Text('Save'))
+        ],
+      )));
+    }catch(e){message('$e');}
+  }
+
   Future<void> showInterviewPrep(int applicationId) async {
     try{
       final r=await api.request('GET','v3/interview-prep/$applicationId');
@@ -582,7 +650,13 @@ class _WorkspaceState extends State<Workspace> {
       _statCard('Needs Action',dashboard['needsAction'],Icons.warning_amber_outlined,onTap:()=>setState((){applicationView='needs_action';tab=1;})),
       _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
     ]),
-    const SizedBox(height:18),Text('Quality mode',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:7),
+    const SizedBox(height:18),
+    Row(children:[
+      Expanded(child:Text('Automation settings',style:Theme.of(context).textTheme.titleMedium)),
+      OutlinedButton.icon(onPressed:editApplicationProfile,icon:const Icon(Icons.badge_outlined),label:const Text('Application profile'))
+    ]),
+    const SizedBox(height:7),
+    Text('Quality mode',style:Theme.of(context).textTheme.titleSmall),const SizedBox(height:7),
     Wrap(spacing:8,children:[
       for(final mode in [('conservative','Conservative · 85+'),('balanced','Balanced · 75+'),('aggressive','Aggressive · 65+')])
         ChoiceChip(label:Text(mode.$2),selected:qualityMode==mode.$1,onSelected:(_)=>setQuality(mode.$1))
