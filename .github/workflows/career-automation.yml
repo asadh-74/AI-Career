@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-12-expanded-software-batch
+# direct-source-batch: 2026-10-12-autonomous-agent-repair
 name: Career Atlas Automation
 
 on:
@@ -38,6 +38,7 @@ jobs:
       ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
       ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
       AUTO_SUBMIT_BROWSER: "true"
+      AUTONOMOUS_AGENT_ANSWERS: "true"
       TAILOR_RESUME: "true"
       ENABLE_EMAIL_MONITOR: "true"
       IMAP_HOST: "imap.gmail.com"
