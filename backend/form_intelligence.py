@@ -212,12 +212,61 @@ def fill_answer(scope,label,value,selector="")->bool:
         except Exception:pass
     return False
 
+def _field_has_value(field)->bool:
+    try:
+        tag=(field.evaluate("(x)=>x.tagName.toLowerCase()") or "").lower()
+    except Exception:tag=""
+    try:typ=(field.get_attribute("type") or "").lower()
+    except Exception:typ=""
+    try:
+        if typ in {"checkbox","radio"}:
+            return bool(field.is_checked())
+    except Exception:pass
+    try:
+        if tag=="select":
+            return bool((field.input_value() or "").strip())
+    except Exception:pass
+    try:
+        return bool((field.input_value() or "").strip())
+    except Exception:
+        return False
+
+def _group_question(scope,field)->str:
+    """Return the human-visible question for radio/checkbox/custom groups."""
+    q=field_label(scope,field)
+    if q:return q
+    try:
+        fs=field.locator("xpath=ancestor::fieldset[1]")
+        if fs.count():
+            legend=fs.locator("legend")
+            if legend.count():
+                q=clean_question(legend.first.inner_text(timeout=500) or "")
+                if q:return q
+    except Exception:pass
+    try:
+        node=field
+        for _ in range(5):
+            node=node.locator("xpath=..")
+            txt=clean_question(node.inner_text(timeout=400) or "")
+            if txt and len(txt)<=500 and not UUID_RE.match(txt):
+                return txt
+    except Exception:pass
+    return ""
+
 def unresolved_required(scope,sensitive_checker=None):
-    """Return structured unresolved required fields with useful labels/selectors."""
+    """Return structured unresolved required fields with useful visible labels.
+
+    This understands ordinary inputs as well as required radio/checkbox groups.
+    It deliberately ignores hidden validation proxies used by Greenhouse/Ashby.
+    """
     out=[]
-    try:required=scope.locator("input[required], textarea[required], select[required], [aria-required='true']")
-    except Exception:return out
-    for i in range(min(required.count(),160)):
+    try:
+        required=scope.locator("input[required], textarea[required], select[required], [aria-required='true']")
+    except Exception:
+        return out
+
+    group_seen=set()
+    for i in range(min(required.count(),200)):
         field=required.nth(i)
         try:
             typ=(field.get_attribute("type") or "").lower()
@@ -228,13 +277,39 @@ def unresolved_required(scope,sensitive_checker=None):
             try:
                 if not field.is_visible():continue
             except Exception:pass
-            # Radio/checkbox groups are handled through browser validation after
-            # submit; individual unchecked choices are not automatically blockers.
-            if typ in {"checkbox","radio"}:continue
-            value=""
-            try:value=(field.input_value() or "").strip()
-            except Exception:pass
-            if value:continue
+
+            if typ in {"checkbox","radio"}:
+                try:
+                    name=(field.get_attribute("name") or "").strip()
+                    fid=(field.get_attribute("id") or "").strip()
+                    group_key=(typ,name or fid or str(i))
+                    if group_key in group_seen:continue
+                    group_seen.add(group_key)
+                    if name:
+                        peers=scope.locator(f'input[type="{typ}"][name="{name}"]')
+                    else:
+                        peers=field.locator("xpath=ancestor::fieldset[1]").locator(f'input[type="{typ}"]')
+                    satisfied=False
+                    for j in range(min(peers.count(),40)):
+                        try:
+                            if peers.nth(j).is_checked():
+                                satisfied=True;break
+                        except Exception:pass
+                    if satisfied:continue
+                    q=_group_question(scope,field)
+                    if not q:continue
+                    sensitive=bool(sensitive_checker(q)) if sensitive_checker else False
+                    out.append({
+                        "label":q[:500],
+                        "selector_hint":selector_hint(field),
+                        "sensitive":sensitive,
+                        "control_type":typ,
+                    })
+                except Exception:
+                    continue
+                continue
+
+            if _field_has_value(field):continue
             q=field_label(scope,field)
             if not q:
                 q=clean_question(" ".join(filter(None,[
@@ -243,15 +318,22 @@ def unresolved_required(scope,sensitive_checker=None):
                 ])))
             if not q:continue
             sensitive=bool(sensitive_checker(q)) if sensitive_checker else False
-            out.append({"label":q[:500],"selector_hint":selector_hint(field),"sensitive":sensitive})
-        except Exception:pass
+            out.append({
+                "label":q[:500],
+                "selector_hint":selector_hint(field),
+                "sensitive":sensitive,
+                "control_type":typ or "text",
+            })
+        except Exception:
+            pass
+
     uniq=[]
     seen=set()
     for item in out:
-        key=(item["label"].lower(),item["selector_hint"])
-        if key in seen:continue
+        key=(clean_question(item["label"]).lower(),item.get("control_type",""))
+        if not key[0] or key in seen:continue
         seen.add(key);uniq.append(item)
-    return uniq[:20]
+    return uniq[:24]
 
 def fill_phone_country(scope,country:str)->bool:
     """Best effort for phone-country comboboxes without touching phone number data."""
