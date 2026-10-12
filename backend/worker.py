@@ -109,10 +109,34 @@ def candidate_fit_priority(job)->int:
     if any(x in loc for x in ("worldwide","global","anywhere","pakistan","apac","asia")):score+=35
     return score
 
+def experience_eligible(job,doc)->bool:
+    """Reject explicit experience requirements that the verified resume cannot support."""
+    title=(job.title or "").lower()
+    text=((job.title or "")+" "+(job.description or "")).lower()
+    cv=(getattr(doc,"extracted_text","") or "").lower()
+    if any(x in title for x in ("junior","graduate","entry","associate","intern")):
+        return True
+    if any(x in title for x in ("mid-level","mid level","midlevel")):
+        return False
+    years=[]
+    for pattern in (
+        r'(?:minimum of|at least|minimum)\s+(\d+)\+?\s+years',
+        r'(\d+)\+\s+years',
+        r'(\d+)\s*(?:-|to)\s*\d+\s+years',
+        r'(?:requires?|required).*?(\d+)\+?\s+years',
+    ):
+        years.extend(int(x) for x in re.findall(pattern,text,re.I))
+    required=max(years) if years else 0
+    early_career=bool(re.search(r'expected\s+2027|graduat(?:ion|ing).*2027|student',cv,re.I))
+    if early_career and required>=3:
+        return False
+    return True
+
 def title_relevant(title:str)->bool:
     t=(title or "").lower()
     excluded=("director","vice president","vp ","head of ","principal","staff engineer","engineering manager",
-              "sales manager","sales director","account manager","solutions architecture manager","senior ","sr. ","sr ","lead ")
+              "sales manager","sales director","account manager","solutions architecture manager","senior ","sr. ","sr ","lead ",
+              "mid-level","mid level","midlevel")
     if any(x in t for x in excluded):
         return False
     if os.getenv("SOFTWARE_ONLY","false").lower() in {"1","true","yes","on"}:
@@ -879,6 +903,7 @@ def run(target_job_id_override=None):
             if not location_eligible(job,profile):continue
             stats["remoteEligible"]+=1
             if not title_relevant(job.title):continue
+            if not experience_eligible(job,doc):continue
             stats["titleRelevant"]+=1
             if not provider_allowed(job.provider,cfg) or not host_allowed(job.apply_url):continue
 
