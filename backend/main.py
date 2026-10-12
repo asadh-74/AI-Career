@@ -434,6 +434,7 @@ def applications(session:Session=Depends(db)):
             "submissionAttempted":"attempt_started" in event_types,
             "employerConfirmed":item.job_id in submitted_job_ids and "confirmed" in event_types,
             "needsAction":item.status=="needs_human",
+            "technicalBlocked":item.status=="technical_blocked",
         }
         output.append(row)
     return output
@@ -611,6 +612,7 @@ def v3_dashboard(session:Session=Depends(db)):
         submitted_keys.add(((job.apply_url or "").strip().lower(),(job.company or "").strip().lower(),(job.title or "").strip().lower()))
     submitted=len(submitted_keys)
     needs=sum(1 for a in apps if a.status=='needs_human')
+    technical_blocked=sum(1 for a in apps if a.status=='technical_blocked')
     failed=sum(1 for a in apps if a.status=='failed')
     milestone_rows=session.scalars(
         select(ApplicationEvent).where(ApplicationEvent.application_id.is_not(None))
@@ -655,6 +657,7 @@ def v3_dashboard(session:Session=Depends(db)):
         'lastAgentAttemptAt':last_agent_attempt,
         'employerConfirmed':employer_confirmed,
         'needsAction':needs,
+        'technicalBlocked':technical_blocked,
         'needsAttention':needs,
         'failed':failed,
         'averageProbability':avg,
