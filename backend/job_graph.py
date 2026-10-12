@@ -220,7 +220,13 @@ def run_application_graph(job, doc, cfg, score: int, draft: str, learned_answers
             "learned_answers": learned_answers or [],
         }
     )
-    return state.get("result") or {
+    result=state.get("result") or {
         "status": "failed",
         "reason": "LangGraph finished without a result",
     }
+    # Internal hand-off to worker.py. The worker persists these for this
+    # application only and removes the key before any user-facing storage.
+    generated=state.get("agent_generated_answers") or []
+    if generated:
+        result["_agent_generated_answers"]=generated
+    return result
