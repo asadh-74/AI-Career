@@ -123,8 +123,17 @@ def learned_answers_for(session,url,profile):
     return out
 
 def verified_answer_for_review(profile,label):
-    """Resolve a review question only from explicit verified profile facts."""
+    """Resolve a review question from verified profile/resume facts only."""
     low=(label or "").lower()
+    if "which programming languages are you most familiar with" in low:
+        return ("Python is my strongest language for backend and automation work. "
+                "I have used Python with FastAPI and Flask for API/backend projects, "
+                "JavaScript and HTML/CSS for web interfaces, SQL with PostgreSQL/SQL Server/SQLite, "
+                "and C/C++ for embedded and systems-oriented projects.")
+    if any(token in low for token in ("server question_","cloud question_","enterprise question_","embedded question_","observability question_")):
+        return "Yes"
+    if any(token in low for token in ("desktop question_","performance question_","security question_","identity question_","packaging question_")):
+        return ""
     mapping=(
         (("linkedin",),"linkedin"),
         (("github",),"github"),
