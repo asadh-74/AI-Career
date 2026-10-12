@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-12-requeue-answered-reviews
+# direct-source-batch: 2026-10-12-expanded-software-batch
 name: Career Atlas Automation
 
 on:
@@ -30,7 +30,7 @@ jobs:
       GEMINI_MODEL: gemini-3.8-flash
       AUTO_APPLY: "true"
       MIN_MATCH_SCORE: "65"
-      MAX_APPLICATIONS_PER_DAY: "25"
+      MAX_APPLICATIONS_PER_DAY: "30"
       REMOTE_ONLY: "true"
       SOFTWARE_ONLY: "true"
       ALLOW_EMAIL_APPLICATIONS: "false"
