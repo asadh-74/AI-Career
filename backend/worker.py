@@ -815,7 +815,12 @@ def run(target_job_id_override=None):
 
         pkt=ZoneInfo("Asia/Karachi");now_pkt=datetime.now(pkt)
         day_start_utc=now_pkt.replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc)
-        submitted_today=len(session.scalars(select(JobStatus).where(JobStatus.status=="submitted",JobStatus.updated_at>=day_start_utc)).all())
+        confirmed_today=session.scalars(select(ApplicationEvent.application_id).where(
+            ApplicationEvent.event_type=="confirmed",
+            ApplicationEvent.created_at>=day_start_utc,
+            ApplicationEvent.application_id.is_not(None),
+        )).all()
+        submitted_today=len(set(confirmed_today))
         stats["submittedToday"]=submitted_today
         remaining_today=max(0,cfg.daily_limit-submitted_today);stats["remainingToday"]=remaining_today
         max_attempts=max(30,min(150,remaining_today*8 if remaining_today else 30))
