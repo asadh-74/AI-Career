@@ -341,22 +341,44 @@ def review_is_waiting_for_user(session,application_id):
     )).all()
     return bool(rows) and any(not (r.answer or "").strip() for r in rows)
 
-def review_requires_user(session,application_id):
-    """Return True only when an unresolved field genuinely requires the user.
+def cleanup_noisy_review_fields(session):
+    """Retire stale review rows produced by older UUID/container-based detectors."""
+    fixed=0
+    rows=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.resolved==False,
+        ReviewAnswer.sensitive==False,
+    )).all()
+    markers=("linkedin","github","twitter","where did you hear","first name","last name","email","phone")
+    for row in rows:
+        label=row.label_key or ""
+        uuid_hits=len(re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",label,re.I))
+        marker_hits=sum(1 for token in markers if token in label.lower())
+        if uuid_hits>=1 or (len(label)>180 and marker_hits>=3):
+            row.resolved=True
+            row.answer=""
+            row.updated_at=datetime.now(timezone.utc)
+            fixed+=1
+    if fixed:session.flush()
+    return fixed
 
-    Normal experience, project, motivation, preference and technology questions
-    are deliberately NOT blockers; LangGraph should try those itself.
-    """
+def review_requires_user(session,application_id):
+    """True only when the agent cannot safely supply an unresolved value."""
     rows=session.scalars(select(ReviewAnswer).where(
         ReviewAnswer.application_id==application_id,
         ReviewAnswer.resolved==False,
     )).all()
+    profile=load_profile()
     hard_patterns=(
         "captcha","verify you are human","assessment","take assessment",
         "criminal","conviction","security clearance","background check",
         "signature","attest","certify","privacy notice","privacy policy","terms of",
         "use only my own words","no ai","ai-generated","artificial intelligence",
-        "date of birth","passport","national id",
+        "date of birth","passport","national id","nationality",
+        "relocate","relocation","willing to travel","travel requirement",
+    )
+    factual_patterns=(
+        "address","post code","postcode","postal code","zip code",
+        "years of experience","how many years","notice period",
     )
     for row in rows:
         if (row.answer or "").strip():
@@ -364,66 +386,10 @@ def review_requires_user(session,application_id):
         low=(row.label_key or "").lower()
         if row.sensitive or any(token in low for token in hard_patterns):
             return True
+        if any(token in low for token in factual_patterns):
+            if not verified_answer_for_review(profile,row.label_key):
+                return True
     return False
-
-def persist_agent_answers(session,application_id,answers):
-    """Persist generated non-sensitive answers only for this application retry state."""
-    saved=0
-    for item in answers or []:
-        if item.get("sensitive"):continue
-        label=clean_question(str(item.get("label") or "")).strip()[:500]
-        value=str(item.get("value") or "").strip()[:3000]
-        if not label or not value:continue
-        row=session.scalar(select(ReviewAnswer).where(
-            ReviewAnswer.application_id==application_id,
-            ReviewAnswer.label_key==label,
-        ))
-        if not row:
-            row=ReviewAnswer(
-                application_id=application_id,label_key=label,answer=value,
-                selector_hint=str(item.get("selector_hint") or "")[:500],
-                sensitive=False,resolved=False,
-            )
-            session.add(row)
-        else:
-            row.answer=value
-            row.selector_hint=str(item.get("selector_hint") or row.selector_hint or "")[:500]
-            row.sensitive=False
-            row.resolved=False
-            row.updated_at=datetime.now(timezone.utc)
-        saved+=1
-    if saved:session.flush()
-    return saved
-
-def reuse_review_answers(session,application_id):
-    """Reuse only prior explicit non-sensitive answers for the same normalized question."""
-    current=session.scalars(select(ReviewAnswer).where(
-        ReviewAnswer.application_id==application_id,
-        ReviewAnswer.resolved==False,
-        ReviewAnswer.sensitive==False,
-    )).all()
-    if not current:return 0
-    prior=session.scalars(select(ReviewAnswer).where(
-        ReviewAnswer.application_id!=application_id,
-        ReviewAnswer.sensitive==False,
-        ReviewAnswer.answer!="",
-    ).order_by(ReviewAnswer.updated_at.desc()).limit(600)).all()
-    memory={}
-    for row in prior:
-        key=clean_question(row.label_key or "").lower()
-        if key and key not in memory:
-            memory[key]=row.answer
-    reused=0
-    for row in current:
-        if (row.answer or "").strip():continue
-        key=clean_question(row.label_key or "").lower()
-        value=memory.get(key)
-        if value:
-            row.answer=value
-            row.updated_at=datetime.now(timezone.utc)
-            reused+=1
-    if reused:session.flush()
-    return reused
 
 def resolve_review_fields(session,application_id):
     rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
@@ -469,29 +435,42 @@ def cleanup_false_review_fields(session):
     return fixed
 
 def requeue_answered_reviews(session):
-    """Recover review jobs whenever no genuinely human-only blocker remains.
+    """Retry only when saved/profile facts now resolve the outstanding fields.
 
-    Normal technical/project/motivation fields may stay unanswered here because
-    LangGraph's autonomous repair node is responsible for resolving them.
+    The initial LangGraph run already performs autonomous repair rounds. We do
+    not endlessly retry an unanswered open-ended question on every schedule.
     """
     moved=0
+    profile=load_profile()
     apps=session.scalars(select(Application).where(Application.status=="needs_human")).all()
     for app in apps:
+        reuse_review_answers(session,app.id)
         rows=session.scalars(select(ReviewAnswer).where(
             ReviewAnswer.application_id==app.id,
             ReviewAnswer.resolved==False,
         )).all()
         if not rows:
             continue
-        if not review_requires_user(session,app.id):
+        for row in rows:
+            if row.sensitive or (row.answer or "").strip():
+                continue
+            value=verified_answer_for_review(profile,row.label_key)
+            if value not in (None,""):
+                row.answer=str(value)
+                row.updated_at=datetime.now(timezone.utc)
+        session.flush()
+        rows=session.scalars(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==app.id,
+            ReviewAnswer.resolved==False,
+        )).all()
+        if rows and all((r.answer or "").strip() for r in rows) and not review_requires_user(session,app.id):
             app.status="ready_for_retry"
-            app.receipt="No human-only blockers remain. LangGraph autonomous retry queued."
+            app.receipt="New saved/profile facts resolve the outstanding fields. Autonomous retry queued."
             record_event(session,app.job_id,"applying","review_requeued",
-                         "No human-only blockers remain; autonomous retry restored.",
+                         "Saved/profile facts now resolve all outstanding fields; retry restored.",
                          application_id=app.id)
             moved+=1
-    if moved:
-        session.flush()
+    if moved:session.flush()
     return moved
 
 def backfill_review_queue(session):
@@ -756,7 +735,7 @@ def run(target_job_id_override=None):
         stats["prioritySourcesAdded"]=ensure_priority_sources(session)
         stats["falseReviewFieldsRemoved"]=cleanup_false_review_fields(session)
         stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
-        stats["answeredReviewsRequeued"]=requeue_answered_reviews(session)
+        stats["noisyReviewFieldsRemoved"]=cleanup_noisy_review_fields(session)
         try:
             profile_extra=json.loads(get_setting(session,"applicant_profile_extra","{}") or "{}")
             if not isinstance(profile_extra,dict):profile_extra={}
@@ -764,6 +743,7 @@ def run(target_job_id_override=None):
             profile_extra={}
         set_profile_overrides(profile_extra)
         profile=load_profile()
+        stats["answeredReviewsRequeued"]=requeue_answered_reviews(session)
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
 
@@ -851,7 +831,7 @@ def run(target_job_id_override=None):
             select(Application,Job)
             .join(Job,Application.job_id==Job.id)
             .where(
-                Application.status.in_(("ready_for_retry","ready_for_review","needs_human")),
+                Application.status.in_(("ready_for_retry","ready_for_review")),
                 Application.score>=cfg.min_match_score,
             )
             .order_by(Application.created_at.asc())
@@ -1062,11 +1042,28 @@ def run(target_job_id_override=None):
                 record_event(session,job.id,"submitted","confirmed",existing.receipt,application_id=existing.id,meta=result.get("meta") or {})
             elif state in {"needs_human","ready"}:
                 reason=result.get("reason","Review required")
-                existing.status="needs_human";existing.receipt=reason
-                mark_status(session,job.id,"not_submitted",reason);stats["needsAttention"]+=1
-                remember_blocker(session,job,reason)
-                store_review_fields(session,existing.id,job,result)
-                record_event(session,job.id,"applying",classify_failure(reason),reason,application_id=existing.id)
+                questions=result.get("review_fields") or extract_review_questions(reason)
+                technical=(
+                    "No actionable Next or Submit control found" in reason
+                    or "Application has more than eight automated form steps" in reason
+                )
+                if not technical and reason.startswith("Submit was clicked but reliable confirmation was not detected.") and questions:
+                    normal=[q for q in questions if not q.get("sensitive")]
+                    technical=bool(normal) and all(
+                        bool(verified_answer_for_review(profile,q.get("label") or ""))
+                        for q in normal
+                    ) and not any(q.get("sensitive") for q in questions)
+                if technical:
+                    existing.status="technical_blocked";existing.receipt=reason
+                    mark_status(session,job.id,"not_submitted",reason)
+                    stats["technicalBlocked"]=stats.get("technicalBlocked",0)+1
+                    record_event(session,job.id,"applying","technical_blocked",reason,application_id=existing.id)
+                else:
+                    existing.status="needs_human";existing.receipt=reason
+                    mark_status(session,job.id,"not_submitted",reason);stats["needsAttention"]+=1
+                    remember_blocker(session,job,reason)
+                    store_review_fields(session,existing.id,job,result)
+                    record_event(session,job.id,"applying",classify_failure(reason),reason,application_id=existing.id)
             else:
                 reason=result.get("reason","Automation failed")
                 existing.status="failed";existing.receipt=reason;stats["failed"]+=1
