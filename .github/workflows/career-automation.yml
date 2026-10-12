@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-12-latest-autonomous-general
+# direct-source-batch: 2026-10-12-stability-upgrade-general
 name: Career Atlas Automation
 
 on:
@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: career-atlas-auto-apply
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   apply:
