@@ -237,7 +237,15 @@ def _select_or_fill_labeled(page,label_pattern,value,aliases=()):
                     item.click()
                     for candidate in candidates:
                         try:
+                            # Greenhouse/Remix comboboxes usually require typing
+                            # before their option list is populated.
+                            try:item.fill(candidate)
+                            except Exception:pass
+                            try:page.wait_for_timeout(250)
+                            except Exception:pass
                             option=page.get_by_role("option",name=re.compile(rf"^{re.escape(candidate)}$",re.I))
+                            if option.count():option.first.click();return True
+                            option=page.get_by_text(re.compile(rf"^{re.escape(candidate)}$",re.I),exact=True)
                             if option.count():option.first.click();return True
                         except Exception:pass
                 typ=(item.get_attribute("type") or "").lower()
@@ -256,8 +264,16 @@ def _select_or_fill_labeled(page,label_pattern,value,aliases=()):
             if combo.count():
                 combo.first.click()
                 for candidate in candidates:
-                    option=page.get_by_role("option",name=re.compile(rf"^{re.escape(candidate)}$",re.I))
-                    if option.count():option.first.click();return True
+                    try:
+                        try:combo.first.fill(candidate)
+                        except Exception:pass
+                        try:page.wait_for_timeout(250)
+                        except Exception:pass
+                        option=page.get_by_role("option",name=re.compile(rf"^{re.escape(candidate)}$",re.I))
+                        if option.count():option.first.click();return True
+                        option=page.get_by_text(re.compile(rf"^{re.escape(candidate)}$",re.I),exact=True)
+                        if option.count():option.first.click();return True
+                    except Exception:pass
     except Exception:pass
     return False
 
@@ -366,6 +382,21 @@ def _fill_learned_answers(page,learned_answers):
                     if typ in ("checkbox","radio"):
                         if bool(value):loc.first.check();filled.append(label);continue
                     loc.first.fill(str(value));filled.append(label);continue
+            if label:
+                try:
+                    labeled=page.get_by_label(re.compile(re.escape(label),re.I))
+                    for i in range(min(labeled.count(),6)):
+                        fld=labeled.nth(i)
+                        typ=(fld.get_attribute("type") or "").lower()
+                        if typ in ("checkbox","radio"):
+                            truthy=(value is True) or str(value).strip().lower() in {"1","true","yes","y","on","selected","check"}
+                            if truthy and not fld.is_checked():
+                                fld.check()
+                            if truthy:
+                                filled.append(label)
+                                break
+                    if label in filled:continue
+                except Exception:pass
             if label and _select_known_answer(page,re.escape(label),value):
                 filled.append(label);continue
             if label and _select_or_fill_labeled(page,re.escape(label),value):
@@ -378,6 +409,24 @@ def _fill_learned_answers(page,learned_answers):
 
 def _verified_profile_answer_for_label(label,profile):
     low=(label or "").lower()
+    if "which programming languages are you most familiar with" in low:
+        return ("Python is my strongest language for backend and automation work. "
+                "I have used Python with FastAPI and Flask for API/backend projects, "
+                "JavaScript and HTML/CSS for web interfaces, SQL with PostgreSQL/SQL Server/SQLite, "
+                "and C/C++ for embedded and systems-oriented projects.")
+    # Canonical's project-interest question is a checkbox group. Select only
+    # areas supported by the verified project history.
+    canonical_interests={
+        "server question_":True,
+        "cloud question_":True,
+        "enterprise question_":True,
+        "embedded question_":True,
+        "observability question_":True,
+    }
+    for token,selected in canonical_interests.items():
+        if token in low:return selected
+    if any(token in low for token in ("desktop question_","performance question_","security question_","identity question_","packaging question_")):
+        return False
     direct=(
         (("full name","your name","name"),"name"),
         (("email",),"email"),
