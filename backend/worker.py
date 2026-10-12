@@ -90,8 +90,10 @@ def direct_apply_priority(job)->int:
         return 5
     if any(x in host for x in ("myworkdayjobs.com","workdayjobs.com")):
         return 4
-    if provider=="indeed":
-        return 3
+    if provider=="indeed" or "indeed.com" in host:
+        return 4
+    if any(x in host for x in ("workable.com","recruitee.com","teamtailor.com","bamboohr.com","icims.com","personio.com")):
+        return 4
     if provider not in AGGREGATOR_PROVIDERS:
         return 2
     return 0
@@ -711,6 +713,14 @@ def run(target_job_id_override=None):
 
             result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=learned)
             state=result.get("status","failed")
+            generated=((result.get("meta") or {}).get("agentGeneratedFields") or [])
+            if generated:
+                stats["agentAnsweredFields"]=stats.get("agentAnsweredFields",0)+len(generated)
+                record_event(
+                    session,job.id,"applying","agent_autofill",
+                    f"LangGraph answered {len(generated)} grounded non-sensitive field(s) from verified resume/profile evidence and retried automatically.",
+                    application_id=existing.id,
+                )
             if state=="below_threshold":
                 stats["belowThreshold"]+=1;session.commit();continue
 
