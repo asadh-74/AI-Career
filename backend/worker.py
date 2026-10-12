@@ -35,6 +35,8 @@ TARGET_TITLE_TERMS=(
     "ai integrator","ai integration","workflow automation","integration engineer","mlops engineer",
 )
 
+SCORING_VERSION="autonomy-v2"
+
 SOFTWARE_ONLY_EXCLUDED=(
     "data scientist","data analyst","business analyst","research scientist","embedded","firmware","iot","hardware",
     "electrical","electronics","support engineer","technical support","solutions engineer","sales","account executive",
@@ -604,17 +606,31 @@ def run(target_job_id_override=None):
             jobs=strategy_select(recent,320)
             session.flush()
 
-        # Applications for which the user answered only the missing review
-        # questions jump to the front of the next LangGraph run.
-        retry_jobs=session.scalars(
-            select(Job).join(Application,Application.job_id==Job.id)
-            .where(Application.status=="ready_for_retry")
-            .order_by(Application.created_at.asc())
-            .limit(5)
+        # Applications that are already prepared and safe for autonomous
+        # continuation jump ahead of fresh discovery. This is the core
+        # submit-first behavior: review is fallback, not the default.
+        priority_apps=session.execute(
+            select(Application,Job)
+            .join(Job,Application.job_id==Job.id)
+            .where(
+                Application.status.in_(("ready_for_retry","ready_for_review")),
+                Application.score>=cfg.min_match_score,
+            )
+            .order_by(Application.score.desc(),Application.created_at.asc())
+            .limit(20)
         ).all()
-        if retry_jobs:
+        priority_jobs=[]
+        for app_row,job_row in priority_apps:
+            if (job_row.company or "").strip().lower()=="canonical" and app_row.status!="ready_for_retry":
+                continue
+            if app_row.status=="ready_for_retry" and review_is_waiting_for_user(session,app_row.id):
+                continue
+            sent_row=session.scalar(select(JobStatus).where(JobStatus.job_id==job_row.id,JobStatus.status=="submitted"))
+            if not sent_row:
+                priority_jobs.append(job_row)
+        if priority_jobs:
             seen=set();ordered=[]
-            for candidate in [*retry_jobs,*jobs]:
+            for candidate in [*priority_jobs,*jobs]:
                 if candidate and candidate.id not in seen:
                     ordered.append(candidate);seen.add(candidate.id)
             jobs=ordered
@@ -671,7 +687,17 @@ def run(target_job_id_override=None):
                 record_event(session,job.id,"discovered","research_skip",research.eligibility_notes);session.commit();continue
 
             force_rescore=os.getenv("FORCE_RESCORE","false").lower() in {"1","true","yes","on"}
-            needs_rescore=existing is not None and (force_rescore or (existing.rationale or "").startswith("Local keyword estimate"))
+            scored_v2=False
+            if existing is not None:
+                scored_v2=session.scalar(select(ApplicationEvent).where(
+                    ApplicationEvent.application_id==existing.id,
+                    ApplicationEvent.event_type=="score_version_autonomy_v2",
+                )) is not None
+            needs_rescore=existing is not None and (
+                force_rescore
+                or (existing.rationale or "").startswith("Local keyword estimate")
+                or (existing.score<cfg.min_match_score and not scored_v2)
+            )
             if not existing or needs_rescore:
                 score,rationale,draft=ai_prepare(job,doc)
                 if existing:
@@ -681,6 +707,9 @@ def run(target_job_id_override=None):
                     session.add(existing)
                 session.flush();stats["scored"]+=1
                 record_event(session,job.id,"matched","scored",f"Match score {score}",application_id=existing.id)
+                record_event(session,job.id,"matched","score_version_autonomy_v2",
+                             f"Scored with {SCORING_VERSION} using the current verified resume profile.",
+                             application_id=existing.id)
 
             metric=upsert_metric(session,job,doc,profile,existing.score)
 
