@@ -276,10 +276,10 @@ def store_review_fields(session,application_id,job,result):
     # re-opened below. This keeps the dashboard focused on the current form.
     old=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
     for row in old:
-        # Explicit protected answers belong to this application only. Keep them
-        # available across retries until a confirmed submission, then
-        # resolve_review_fields() clears them.
-        if row.sensitive and (row.answer or "").strip():
+        # Any explicit/generated answer that already worked remains available
+        # for this same application across retries. Protected answers are still
+        # one-application-only and are cleared after confirmed submission.
+        if (row.answer or "").strip():
             row.resolved=False
         else:
             row.resolved=True
@@ -340,6 +340,35 @@ def review_requires_user(session,application_id):
         if row.sensitive or any(token in low for token in hard_patterns):
             return True
     return False
+
+def persist_agent_answers(session,application_id,answers):
+    """Persist generated non-sensitive answers only for this application retry state."""
+    saved=0
+    for item in answers or []:
+        if item.get("sensitive"):continue
+        label=clean_question(str(item.get("label") or "")).strip()[:500]
+        value=str(item.get("value") or "").strip()[:3000]
+        if not label or not value:continue
+        row=session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.label_key==label,
+        ))
+        if not row:
+            row=ReviewAnswer(
+                application_id=application_id,label_key=label,answer=value,
+                selector_hint=str(item.get("selector_hint") or "")[:500],
+                sensitive=False,resolved=False,
+            )
+            session.add(row)
+        else:
+            row.answer=value
+            row.selector_hint=str(item.get("selector_hint") or row.selector_hint or "")[:500]
+            row.sensitive=False
+            row.resolved=False
+            row.updated_at=datetime.now(timezone.utc)
+        saved+=1
+    if saved:session.flush()
+    return saved
 
 def reuse_review_answers(session,application_id):
     """Reuse only prior explicit non-sensitive answers for the same normalized question."""
@@ -928,6 +957,8 @@ def run(target_job_id_override=None):
 
             result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=learned)
             state=result.get("status","failed")
+            generated_answers=result.pop("_agent_generated_answers",[]) or []
+            persisted_generated=persist_agent_answers(session,existing.id,generated_answers)
             generated=((result.get("meta") or {}).get("agentGeneratedFields") or [])
             if generated:
                 stats["agentAnsweredFields"]=stats.get("agentAnsweredFields",0)+len(generated)
@@ -935,6 +966,7 @@ def run(target_job_id_override=None):
                     session,job.id,"applying","agent_autofill",
                     f"LangGraph answered {len(generated)} grounded non-sensitive field(s) from verified resume/profile evidence and retried automatically.",
                     application_id=existing.id,
+                    meta={"persisted":persisted_generated},
                 )
             if state=="below_threshold":
                 stats["belowThreshold"]+=1;session.commit();continue
