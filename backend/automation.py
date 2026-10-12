@@ -512,18 +512,18 @@ def generate_verified_application_answers(job,resume_text,draft,review_fields):
 Use ONLY the verified EVIDENCE below and the JOB context. Never invent facts.
 
 Return ONLY JSON:
-{{"answers":[{{"label":"exact question label","answer":"concise first-person answer","evidence_quote":"exact quote copied from EVIDENCE"}}]}}
+{{"answers":[{{"label":"exact question label","answer":"concise first-person answer","answer_type":"grounded|nonfactual","evidence_quote":"exact quote copied from EVIDENCE when grounded"}}]}}
 
 STRICT RULES:
-- Omit a question if the evidence does not directly support the answer.
-- evidence_quote must be an exact verbatim substring from EVIDENCE, 5-45 words.
+- For factual experience/project/education/skill answers, use answer_type="grounded" and include an exact 5-45 word evidence_quote copied from EVIDENCE.
+- For clearly subjective motivation, preference, teamwork-style, or hypothetical questions that do not require a personal historical fact, you may use answer_type="nonfactual". Keep these modest and job-relevant; do not claim unverified experience, achievements, availability, legal status, or consequential personal preferences.
+- Omit any question that requires a factual answer not supported by EVIDENCE.
 - Never answer demographics/protected traits, criminal/security questions, grades/GPA/test scores,
   work authorization for a named jurisdiction, sponsorship for a named jurisdiction, compensation if absent,
   relocation/travel commitments, legal attestations, privacy/terms consent, signatures, assessments,
   or any question asking the applicant to promise the answer is entirely their own words/no AI.
 - Do not invent years of experience, employers, technologies, dates, achievements, degrees or certifications.
-- For experience/project questions, summarize only supported experience from EVIDENCE.
-- For motivation/fit questions, connect the job to supported skills without claiming facts not in EVIDENCE.
+- For motivation/fit questions, connect the role to supported skills without adding unsupported factual claims.
 - Keep each answer under 120 words.
 
 JOB COMPANY: {getattr(job,'company','')}
@@ -568,13 +568,19 @@ EVIDENCE:
         if not isinstance(item,dict):continue
         label=re.sub(r"\s+"," ",str(item.get("label") or "")).strip()
         answer=re.sub(r"\s+"," ",str(item.get("answer") or "")).strip()
+        answer_type=str(item.get("answer_type") or "grounded").strip().lower()
         quote=re.sub(r"\s+"," ",str(item.get("evidence_quote") or "")).strip()
         canonical=by_label.get(label.lower())
-        if not canonical or not answer or not quote:
+        if not canonical or not answer:
             continue
         if len(answer)>1500:
             answer=answer[:1500]
-        if _normalize_evidence(quote) not in evidence_norm:
+        if answer_type=="grounded":
+            if not quote or _normalize_evidence(quote) not in evidence_norm:
+                continue
+        elif answer_type=="nonfactual":
+            quote=""
+        else:
             continue
         original=next((x for x in pending if re.sub(r"\s+"," ",str(x.get("label") or "")).strip()==canonical),None)
         answers.append({
