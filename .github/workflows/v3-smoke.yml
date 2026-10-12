@@ -50,6 +50,9 @@ jobs:
           assert ats_adapters.ats_name("https://jobs.ashbyhq.com/acme/123") == "ashby"
           assert hasattr(job_graph, "APPLICATION_GRAPH")
           assert hasattr(worker, "run")
+          assert callable(worker.reuse_review_answers)
+          assert callable(worker.persist_agent_answers)
+          assert callable(worker.requeue_answered_reviews)
           assert form_intelligence.clean_question("123e4567-e89b-12d3-a456-426614174000 Type here... What is your Python experience?") == "What is your Python experience?"
           assert form_intelligence.visible_option_label("Server question_123[] question_123[]_456") == "Server"
           assert form_intelligence.truthy("Yes")
