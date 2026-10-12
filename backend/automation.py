@@ -5,11 +5,13 @@ or missing verified profile data stop submission and return needs_human.
 """
 from __future__ import annotations
 import json, os, re, smtplib, tempfile
+import httpx
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from ats_adapters import ats_name, fill_ats_fields, application_root
+from canonical_resume import CANONICAL_RESUME_TEXT
 
 SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity","religion","religious",
 "assessment","test","captcha")
@@ -374,6 +376,171 @@ def _fill_learned_answers(page,learned_answers):
             pass
     return filled
 
+def _verified_profile_answer_for_label(label,profile):
+    low=(label or "").lower()
+    direct=(
+        (("full name","your name","name"),"name"),
+        (("email",),"email"),
+        (("phone","mobile"),"phone"),
+        (("linkedin",),"linkedin"),
+        (("github",),"github"),
+        (("portfolio","personal website","website"),"portfolio"),
+        (("country",),"country"),
+        (("city",),"city"),
+        (("university","college"),"university"),
+        (("field of study","major","discipline"),"field_of_study"),
+        (("degree name","qualification"),"degree_name"),
+        (("degree level","degree type","highest degree"),"degree"),
+        (("graduation year","expected graduation"),"graduation_year"),
+        (("availability","start date"),"availability"),
+        (("salary expectation","desired salary"),"salary_expectation_amount"),
+    )
+    for tokens,key in direct:
+        if any(token in low for token in tokens):
+            value=profile.get(key)
+            if value not in (None,""):return str(value)
+    if any(x in low for x in ("authorized to work","work authorization")) and not any(x in low for x in LEGAL_JURISDICTION_TERMS):
+        value=profile.get("work_authorized")
+        if value is not None:return "Yes" if bool(value) else "No"
+    if any(x in low for x in ("require sponsorship","need sponsorship","visa sponsorship")) and not any(x in low for x in LEGAL_JURISDICTION_TERMS):
+        value=profile.get("requires_sponsorship")
+        if value is not None:return "Yes" if bool(value) else "No"
+    return ""
+
+def _agent_may_answer(label):
+    low=(label or "").lower()
+    if not low or needs_human(label):
+        return False
+    blocked=(
+        "high school","secondary school","gpa","grade","grading system","mathematics","native language",
+        "ranking","exam score","test score","criminal","conviction","security clearance",
+        "privacy notice","privacy policy","terms of","consent","agree to","i agree","attest","certify",
+        "signature","background check","relocat","willing to travel","travel requirement",
+        "notice period","date of birth","age","marital","national id","passport",
+        "use only my own words","generated content","ai-generated","artificial intelligence","plagiarism",
+        "years of experience","how many years",
+    )
+    return not any(token in low for token in blocked)
+
+def _normalize_evidence(text):
+    return re.sub(r"\s+"," ",(text or "")).strip().lower()
+
+def generate_verified_application_answers(job,resume_text,draft,review_fields):
+    """Generate only grounded, non-sensitive answers for one LangGraph repair pass.
+
+    Deterministic profile facts are preferred. Open-ended answers are accepted
+    only when Gemini returns an exact supporting quote found in the verified
+    resume evidence. Unknown/legal/protected facts are deliberately omitted.
+    """
+    if os.getenv("AUTONOMOUS_AGENT_ANSWERS","true").lower() not in {"1","true","yes","on"}:
+        return []
+    profile=load_profile()
+    answers=[]
+    pending=[]
+    seen=set()
+    for item in review_fields or []:
+        label=re.sub(r"\s+"," ",str(item.get("label") or "")).strip()[:500]
+        if not label or label.lower() in seen:
+            continue
+        seen.add(label.lower())
+        if bool(item.get("sensitive")) or not _agent_may_answer(label):
+            continue
+        value=_verified_profile_answer_for_label(label,profile)
+        if value:
+            answers.append({
+                "label":label,
+                "selector_hint":str(item.get("selector_hint") or "")[:500],
+                "value":value,
+                "sensitive":False,
+                "source":"verified_profile",
+            })
+        else:
+            pending.append(item)
+
+    key=os.getenv("GEMINI_API_KEY","").strip()
+    if not key or not pending:
+        return answers
+
+    evidence=(resume_text or CANONICAL_RESUME_TEXT or "")[:18000]
+    labels=[re.sub(r"\s+"," ",str(x.get("label") or "")).strip()[:500] for x in pending[:8]]
+    prompt=f"""You are the autonomous application-answering node in Career Atlas.
+Use ONLY the verified EVIDENCE below and the JOB context. Never invent facts.
+
+Return ONLY JSON:
+{{"answers":[{{"label":"exact question label","answer":"concise first-person answer","evidence_quote":"exact quote copied from EVIDENCE"}}]}}
+
+STRICT RULES:
+- Omit a question if the evidence does not directly support the answer.
+- evidence_quote must be an exact verbatim substring from EVIDENCE, 5-45 words.
+- Never answer demographics/protected traits, criminal/security questions, grades/GPA/test scores,
+  work authorization for a named jurisdiction, sponsorship for a named jurisdiction, compensation if absent,
+  relocation/travel commitments, legal attestations, privacy/terms consent, signatures, assessments,
+  or any question asking the applicant to promise the answer is entirely their own words/no AI.
+- Do not invent years of experience, employers, technologies, dates, achievements, degrees or certifications.
+- For experience/project questions, summarize only supported experience from EVIDENCE.
+- For motivation/fit questions, connect the job to supported skills without claiming facts not in EVIDENCE.
+- Keep each answer under 120 words.
+
+JOB COMPANY: {getattr(job,'company','')}
+JOB TITLE: {getattr(job,'title','')}
+JOB DESCRIPTION:
+{(getattr(job,'description','') or '')[:7000]}
+
+QUESTIONS:
+{json.dumps(labels,ensure_ascii=False)}
+
+EVIDENCE:
+{evidence}
+"""
+    configured=os.getenv("GEMINI_MODEL","gemini-3.8-flash").strip()
+    models=[]
+    for model in (configured,"gemini-3.8-flash","gemini-3.5-flash","gemini-flash-latest"):
+        if model and model not in models:models.append(model)
+    payload=None
+    for model in models:
+        try:
+            response=httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key":key},
+                json={
+                    "contents":[{"parts":[{"text":prompt}]}],
+                    "generationConfig":{"responseMimeType":"application/json","temperature":0.1},
+                },
+                timeout=45,
+            )
+            if response.status_code>=400:
+                continue
+            payload=json.loads(response.json()["candidates"][0]["content"]["parts"][0]["text"])
+            break
+        except Exception:
+            continue
+    if not isinstance(payload,dict):
+        return answers
+
+    by_label={x.lower():x for x in labels}
+    evidence_norm=_normalize_evidence(evidence)
+    for item in payload.get("answers",[]) if isinstance(payload.get("answers"),list) else []:
+        if not isinstance(item,dict):continue
+        label=re.sub(r"\s+"," ",str(item.get("label") or "")).strip()
+        answer=re.sub(r"\s+"," ",str(item.get("answer") or "")).strip()
+        quote=re.sub(r"\s+"," ",str(item.get("evidence_quote") or "")).strip()
+        canonical=by_label.get(label.lower())
+        if not canonical or not answer or not quote:
+            continue
+        if len(answer)>1500:
+            answer=answer[:1500]
+        if _normalize_evidence(quote) not in evidence_norm:
+            continue
+        original=next((x for x in pending if re.sub(r"\s+"," ",str(x.get("label") or "")).strip()==canonical),None)
+        answers.append({
+            "label":canonical,
+            "selector_hint":str((original or {}).get("selector_hint") or "")[:500],
+            "value":answer,
+            "sensitive":False,
+            "source":"verified_resume_ai",
+        })
+    return answers
+
 def review_fields_from_reason(reason):
     """Convert a human-readable blocker into structured review fields."""
     fields=[]
@@ -486,7 +653,7 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
     return None
 
 AGGREGATOR_HOSTS=("weworkremotely.com","remoteok.com","jobicy.com","himalayas.app","arbeitnow.com","arbeitnow.ch","remotive.com")
-ATS_HOST_HINTS=("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com")
+ATS_HOST_HINTS=("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com","indeed.com","glassdoor.com","workable.com","recruitee.com","teamtailor.com","bamboohr.com","icims.com","personio.com")
 
 def _follow_external_apply(page):
     """Resolve an aggregator listing to the employer/ATS application page."""
@@ -640,7 +807,7 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                     # Store only host/path/status. Never store query strings,
                     # request bodies or applicant data.
                     atsish=(
-                        any(x in host for x in ("greenhouse.io","ashbyhq.com","lever.co","smartrecruiters.com","workday"))
+                        any(x in host for x in ("greenhouse.io","ashbyhq.com","lever.co","smartrecruiters.com","workday","indeed.com","glassdoor.com","workable.com","recruitee.com","teamtailor.com","bamboohr.com","icims.com","personio.com"))
                         or any(x in path.lower() for x in ("application","apply","submit","candidate"))
                     )
                     if atsish:
@@ -676,7 +843,7 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                 except Exception:
                     pass
 
-                for _ in range(5):
+                for _ in range(8):
                     signal=_stop_signal(page)
                     if signal:return {"status":"needs_human","reason":signal}
 
@@ -840,7 +1007,7 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                             pass
                     return {"status":"needs_human","reason":"No actionable Next or Submit control found"}
 
-                return {"status":"needs_human","reason":"Application has more than five automated form steps"}
+                return {"status":"needs_human","reason":"Application has more than eight automated form steps"}
             except Exception as exc:
                 return {"status":"failed","reason":f"{type(exc).__name__}: {str(exc)[:220]}"}
             finally:browser.close()
