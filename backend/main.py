@@ -737,7 +737,7 @@ def v3_review_answers(application_id:int,body:ReviewAnswersIn,session:Session=De
     if saved:
         item.status="ready_for_retry"
         record_event(session,item.job_id,'applying','review_answered',
-                     f'{saved} review answer(s) supplied; queued for LangGraph retry.',
+                     f'{saved} review answer(s) supplied; LangGraph will resolve remaining non-sensitive fields.',
                      application_id=item.id)
     session.commit()
     return {
@@ -844,8 +844,18 @@ def v3_review_submit(application_id:int,body:ReviewSubmitIn,background_tasks:Bac
         row.answer=entry.answer.strip()[:2000]
         row.updated_at=datetime.now(timezone.utc)
     session.flush()
-    missing=[row.label_key for row in rows if not (row.answer or '').strip()]
-    if missing:
+    from worker import review_requires_user
+    if review_requires_user(session,application.id):
+        hard_tokens=(
+            'captcha','assessment','criminal','conviction','security clearance',
+            'signature','attest','certify','use only my own words','no ai',
+            'ai-generated','artificial intelligence','date of birth','passport','national id'
+        )
+        missing=[
+            row.label_key for row in rows
+            if not (row.answer or '').strip()
+            and (row.sensitive or any(token in (row.label_key or '').lower() for token in hard_tokens))
+        ]
         session.commit()
         return {'status':'needs_answers','missing':missing[:12]}
     application.status='ready_for_retry'
