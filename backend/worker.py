@@ -794,11 +794,12 @@ def run(target_job_id_override=None):
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
                 continue
-            if not location_eligible(job_row,profile):
+            chosen_job=prefer_direct_duplicate(session,job_row)
+            if not location_eligible(chosen_job,profile):
                 continue
-            sent_row=session.scalar(select(JobStatus).where(JobStatus.job_id==job_row.id,JobStatus.status=="submitted"))
+            sent_row=session.scalar(select(JobStatus).where(JobStatus.job_id==chosen_job.id,JobStatus.status=="submitted"))
             if not sent_row:
-                priority_pairs.append((app_row,job_row))
+                priority_pairs.append((app_row,chosen_job))
         priority_pairs.sort(
             key=lambda pair:(candidate_fit_priority(pair[1]),int(pair[0].score or 0)),
             reverse=True,
