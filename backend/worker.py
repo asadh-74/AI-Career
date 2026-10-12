@@ -7,11 +7,12 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 import os
 import re
+import json
 
 import httpx
 from sqlalchemy import select
 
-from automation import AutomationConfig, host_allowed, load_profile, provider_allowed
+from automation import AutomationConfig, host_allowed, load_profile, provider_allowed, set_profile_overrides
 from main import Application, Document, Job, JobStatus, SessionLocal, Source, ai_prepare, scan
 from public_sources import scan_public_sources
 from job_graph import run_application_graph
@@ -24,7 +25,7 @@ from v3_models import (
     ApplicationArtifact, ApplicationEvent, EmployerMessage, FollowUpDraft,
     InterviewPrep, JobMetric, QuestionMemory, ResearchResult, ResumeVariant, ReviewAnswer,
     classify_failure, dimensional_scores, extract_review_questions, job_fingerprint, quality_threshold,
-    record_event, strategy_select,
+    record_event, strategy_select, get_setting,
 )
 
 TARGET_TITLE_TERMS=(
@@ -749,6 +750,12 @@ def run(target_job_id_override=None):
         stats["falseReviewFieldsRemoved"]=cleanup_false_review_fields(session)
         stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
         stats["answeredReviewsRequeued"]=requeue_answered_reviews(session)
+        try:
+            profile_extra=json.loads(get_setting(session,"applicant_profile_extra","{}") or "{}")
+            if not isinstance(profile_extra,dict):profile_extra={}
+        except Exception:
+            profile_extra={}
+        set_profile_overrides(profile_extra)
         profile=load_profile()
         cfg.min_match_score=quality_threshold(session,cfg.min_match_score)
         stats["qualityThreshold"]=cfg.min_match_score
