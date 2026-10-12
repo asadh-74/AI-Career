@@ -703,6 +703,8 @@ def ensure_priority_sources(session):
         ("Vercel","Greenhouse","vercel"),
         ("Dataiku","Greenhouse","dataiku"),
         ("Smart Working Solutions","Lever","smart-working-solutions"),
+        ("Binance","Lever","binance"),
+        ("Wynd Labs","Ashby","wynd-labs"),
     )
     added=0
     # Disable retired/broken feeds instead of reporting the same network error
