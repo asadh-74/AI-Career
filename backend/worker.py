@@ -306,7 +306,11 @@ def cleanup_false_review_fields(session):
     return fixed
 
 def requeue_answered_reviews(session):
-    """Recover review jobs whose explicit answers are complete but status regressed."""
+    """Recover review jobs whenever no genuinely human-only blocker remains.
+
+    Normal technical/project/motivation fields may stay unanswered here because
+    LangGraph's autonomous repair node is responsible for resolving them.
+    """
     moved=0
     apps=session.scalars(select(Application).where(Application.status=="needs_human")).all()
     for app in apps:
@@ -316,11 +320,11 @@ def requeue_answered_reviews(session):
         )).all()
         if not rows:
             continue
-        if all((r.answer or "").strip() for r in rows):
+        if not review_requires_user(session,app.id):
             app.status="ready_for_retry"
-            app.receipt="All review answers are already saved. LangGraph retry queued automatically."
+            app.receipt="No human-only blockers remain. LangGraph autonomous retry queued."
             record_event(session,app.job_id,"applying","review_requeued",
-                         "All unresolved review fields already have explicit answers; retry restored automatically.",
+                         "No human-only blockers remain; autonomous retry restored.",
                          application_id=app.id)
             moved+=1
     if moved:
@@ -868,21 +872,18 @@ def retry_application(application_id:int):
         app=session.get(Application,application_id)
         if not app:
             return {"status":"not_found"}
-        sensitive=session.scalars(select(ReviewAnswer).where(
-            ReviewAnswer.application_id==application_id,
-            ReviewAnswer.resolved==False,
-            ReviewAnswer.sensitive==True,
-        )).all()
-        missing_sensitive=[r.label_key for r in sensitive if not (r.answer or "").strip()]
-        if missing_sensitive:
-            return {"status":"needs_answers","missing":missing_sensitive[:12]}
-        pending=session.scalars(select(ReviewAnswer).where(
-            ReviewAnswer.application_id==application_id,
-            ReviewAnswer.resolved==False,
-            ReviewAnswer.sensitive==False,
-        )).all()
-        missing=[r.label_key for r in pending if not (r.answer or "").strip()]
-        if missing:
+        if review_requires_user(session,application_id):
+            rows=session.scalars(select(ReviewAnswer).where(
+                ReviewAnswer.application_id==application_id,
+                ReviewAnswer.resolved==False,
+            )).all()
+            missing=[r.label_key for r in rows if not (r.answer or "").strip() and (
+                r.sensitive or any(token in (r.label_key or "").lower() for token in (
+                    "captcha","assessment","criminal","conviction","security clearance",
+                    "signature","attest","certify","use only my own words","no ai",
+                    "ai-generated","artificial intelligence","date of birth","passport","national id"
+                ))
+            )]
             return {"status":"needs_answers","missing":missing[:12]}
         job_id=app.job_id
         record_event(session,job_id,"applying","review_retry_queued","User supplied review answers; LangGraph retry starting.",application_id=application_id)
