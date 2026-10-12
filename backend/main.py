@@ -425,7 +425,7 @@ def applications(session:Session=Depends(db)):
         row["milestones"]={
             "answersSaved":bool(event_types & {"review_answers_saved","review_answered"}),
             "submissionAttempted":"attempt_started" in event_types,
-            "employerConfirmed":item.job_id in submitted_job_ids,
+            "employerConfirmed":item.job_id in submitted_job_ids and "confirmed" in event_types,
             "needsAction":item.status=="needs_human",
         }
         output.append(row)
@@ -600,6 +600,13 @@ def v3_dashboard(session:Session=Depends(db)):
         e.application_id for e in milestone_rows
         if e.event_type=="attempt_started"
     })
+    submitted_job_ids={s.job_id for s in statuses if s.status=="submitted"}
+    employer_confirmed=len({
+        e.application_id for e in milestone_rows
+        if e.event_type=="confirmed"
+        and e.application_id is not None
+        and (lambda app: bool(app and app.job_id in submitted_job_ids))(session.get(Application,e.application_id))
+    })
     avg=round(sum(m.probability for m in metrics)/max(1,len(metrics))) if metrics else 0
     stages={}
     latest={}
@@ -615,7 +622,7 @@ def v3_dashboard(session:Session=Depends(db)):
         'submitted':submitted,
         'answersSaved':answers_saved,
         'submissionAttempted':submission_attempted,
-        'employerConfirmed':submitted,
+        'employerConfirmed':employer_confirmed,
         'needsAction':needs,
         'needsAttention':needs,
         'failed':failed,
