@@ -626,105 +626,58 @@ def review_fields_from_reason(reason):
     return fields[:12]
 
 def _sensitive_or_unknown_required(page,sensitive_filled=None):
+    """Return only genuine unresolved applicant questions.
+
+    Hidden ATS validation proxies are ignored. Structured visible questions are
+    preferred so LangGraph sees human-readable labels instead of UUIDs/HTML.
+    """
     root=application_root(page)
     blockers=[]
+    explicit=set(sensitive_filled or [])
 
-    labels=root.locator("label")
-    for i in range(min(labels.count(),120)):
-        label=labels.nth(i)
-        text=(label.inner_text() or "").strip()
-        if text and needs_human(text):
-            low=text.lower()
-            explicit=sensitive_filled or []
-            if ("gender" in low and "gender" in explicit) or (("race" in low or "ethnicity" in low) and "race_ethnicity" in explicit) or ("veteran" in low and "veteran_status" in explicit) or ("disability" in low and "disability_status" in explicit):
-                continue
-            # Optional demographic/sensitive questions are left blank instead
-            # of blocking the application or inventing an answer.
-            required=False
-            try:
-                parent=label.locator("xpath=..")
-                required=parent.locator("input[required],select[required],textarea[required],[aria-required='true']").count()>0
-            except Exception:
-                required=False
-            if not required and "*" not in text and "required" not in low:
-                # Optional protected/demographic questions are intentionally
-                # left unanswered; the rest of the application may continue.
-                continue
-            blockers.append(f"Sensitive/uncertain question: {text[:180]}")
-
+    # Required visible fields/groups first.
     structured=unresolved_required(root,needs_human)
     for item in structured:
-        prefix="Sensitive/uncertain question: " if item.get("sensitive") else "Unknown required field: "
-        blockers.append(prefix+clean_question(item.get("label") or ""))
+        label=clean_question(item.get("label") or "")
+        if not label:continue
+        low=label.lower()
+        if item.get("sensitive"):
+            if ("gender" in low and "gender" in explicit):continue
+            if (("race" in low or "ethnicity" in low) and "race_ethnicity" in explicit):continue
+            if ("veteran" in low and "veteran_status" in explicit):continue
+            if ("disability" in low and "disability_status" in explicit):continue
+            blockers.append(f"Sensitive/uncertain question: {label}")
+        else:
+            blockers.append(f"Unknown required field: {label}")
 
-    required=root.locator("input[required], textarea[required], select[required]")
-    safe_tokens=("name","email","phone","mobile","location","city","country","linkedin","github","portfolio","website",
-                 "resume","cv","cover","message","additional","authorization","authorized","sponsorship","salary",
-                 "availability","start date","university","college","school","degree","education","major","field of study",
-                 "graduation","graduate year","expected graduation")
-    for i in range(min(required.count(),120)):
-        field=required.nth(i)
-        try:
-            typ=(field.get_attribute("type") or "").lower()
-            aria_hidden=(field.get_attribute("aria-hidden") or "").lower()
-            tabindex=(field.get_attribute("tabindex") or "").strip()
-            classes=(field.get_attribute("class") or "").lower()
-            if typ in ("hidden","submit","button","file","checkbox","radio"):continue
-            # Greenhouse/Remix and other ATS products use invisible required
-            # proxy inputs to drive custom dropdown validation. They are not
-            # applicant questions and must not block an otherwise completed form.
-            if aria_hidden=="true" or tabindex=="-1" or "requiredinput" in classes:
-                continue
-            try:
-                if not field.is_visible():
-                    continue
-            except Exception:
-                pass
-            value=(field.input_value() or "").strip()
-            if value:continue
-            ident=" ".join(filter(None,[
-                field.get_attribute("name"),field.get_attribute("id"),field.get_attribute("placeholder"),
-                field.get_attribute("aria-label"),field.get_attribute("data-testid"),
-            ])).lower()
-            if "newsletter" in ident:continue
-            if any(clean_question(item.get("label") or "").lower()==clean_question(ident).lower() for item in structured):
-                continue
-            if not any(tok in ident for tok in safe_tokens):
-                visible_label=""
+    # Some ATSs mark requiredness only in label text. Catch those protected
+    # questions without treating optional demographics as blockers.
+    try:
+        labels=root.locator("label")
+        for i in range(min(labels.count(),160)):
+            text=clean_question(labels.nth(i).inner_text() or "")
+            if not text or not needs_human(text):continue
+            low=text.lower()
+            if ("gender" in low and "gender" in explicit):continue
+            if (("race" in low or "ethnicity" in low) and "race_ethnicity" in explicit):continue
+            if ("veteran" in low and "veteran_status" in explicit):continue
+            if ("disability" in low and "disability_status" in explicit):continue
+            required=("*" in text or "required" in low)
+            if not required:
                 try:
-                    fid=(field.get_attribute("id") or "").strip()
-                    if fid:
-                        lab=root.locator(f'label[for="{fid}"]')
-                        if lab.count():
-                            visible_label=(lab.first.inner_text(timeout=500) or "").strip()
+                    parent=labels.nth(i).locator("xpath=..")
+                    required=parent.locator("input[required],select[required],textarea[required],[aria-required='true']").count()>0
                 except Exception:pass
-                if not visible_label:
-                    try:
-                        wrapper=field.locator("xpath=ancestor::*[self::div or self::fieldset][1]")
-                        wrapper_text=(wrapper.inner_text(timeout=500) or "").strip()
-                        wrapper_text=re.sub(r"\s+"," ",wrapper_text)
-                        # Ashby inputs often have UUID names but a useful visible
-                        # question in the nearest container.
-                        if wrapper_text and len(wrapper_text)<=500:
-                            visible_label=wrapper_text
-                    except Exception:pass
-                label_text=re.sub(r"\s+"," ",visible_label).strip()
-                if label_text:
-                    blockers.append(f"Unknown required field: {label_text[:320]}")
-                else:
-                    try:html=(field.evaluate("(el)=>el.outerHTML") or "")[:220]
-                    except Exception:html=""
-                    blockers.append(f"Unknown required field: {ident[:160] or 'unlabelled required field'} {html}")
-        except Exception:pass
+            if required:
+                item=f"Sensitive/uncertain question: {text[:500]}"
+                if item not in blockers:blockers.append(item)
+    except Exception:
+        pass
 
-    if blockers:
-        # Return all unique blockers so the next adapter/memory update can fix
-        # the entire form in one iteration rather than one field at a time.
-        unique=[]
-        for b in blockers:
-            if b not in unique:unique.append(b)
-        return " | ".join(unique[:12])
-    return None
+    unique=[]
+    for item in blockers:
+        if item not in unique:unique.append(item)
+    return " | ".join(unique[:16]) if unique else None
 
 AGGREGATOR_HOSTS=("weworkremotely.com","remoteok.com","jobicy.com","himalayas.app","arbeitnow.com","arbeitnow.ch","remotive.com")
 ATS_HOST_HINTS=("greenhouse.io","lever.co","ashbyhq.com","smartrecruiters.com","myworkdayjobs.com","workdayjobs.com","indeed.com","glassdoor.com","workable.com","recruitee.com","teamtailor.com","bamboohr.com","icims.com","personio.com")
@@ -1049,25 +1002,27 @@ def apply_with_playwright(url,pdf,filename,draft,learned_answers=None):
                         if network_posts:
                             brief=", ".join(f"{x['status']} {x['host']}{x['path']}"+(f" op={x.get('op')}" if x.get("op") else "") for x in network_posts[-8:])
                             diag+=f" ATS POST responses: {brief}"
-                        invalid=[]
-                        for scope in _scopes(page):
-                            invalid.extend(_validation_diagnostics(scope,profile))
-                        invalid=list(dict.fromkeys(invalid))[:10]
-                        if invalid:
-                            diag+=" Invalid fields: "+" | ".join(invalid)
-                        reason="Submit was clicked but reliable confirmation was not detected."+diag
                         review_fields=[]
-                        for label in invalid:
-                            low=(label or "").lower()
-                            if "apply for this job" in low and "first name" in low and "email" in low:
-                                continue
-                            review_fields.append({
-                                "label":label[:320],
-                                "sensitive":bool(needs_human(label)),
-                                "kind":"sensitive" if needs_human(label) else "validation",
-                                "selector_hint":"",
-                            })
-                        return {"status":"needs_human","reason":reason,"review_fields":review_fields[:12],"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
+                        for scope in _scopes(page):
+                            for item in unresolved_required(scope,needs_human):
+                                label=clean_question(item.get("label") or "")
+                                if not label:continue
+                                review_fields.append({
+                                    "label":label[:500],
+                                    "sensitive":bool(item.get("sensitive")),
+                                    "kind":"sensitive" if item.get("sensitive") else "validation",
+                                    "selector_hint":str(item.get("selector_hint") or "")[:500],
+                                })
+                        dedup=[];seen=set()
+                        for item in review_fields:
+                            key=(item["label"].lower(),item["selector_hint"])
+                            if key in seen:continue
+                            seen.add(key);dedup.append(item)
+                        review_fields=dedup[:16]
+                        if review_fields:
+                            diag+=" Invalid fields: "+" | ".join(x["label"] for x in review_fields)
+                        reason="Submit was clicked but reliable confirmation was not detected."+diag
+                        return {"status":"needs_human","reason":reason,"review_fields":review_fields,"pre_screenshot":pre_shot,"post_screenshot":post_shot,"meta":meta}
 
                     if nxt is None:nxt=_find_next(active_scope)
                     if nxt is not None:
