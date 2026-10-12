@@ -79,7 +79,6 @@ class _WorkspaceState extends State<Workspace> {
   Map<String,dynamic> dashboard={};
   String query='', statusFilter='all', qualityMode='balanced';
   String applicationQuery='';
-  bool applicationView='all';
   String applicationView='all';
   @override void initState(){super.initState();reload();}
   Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
