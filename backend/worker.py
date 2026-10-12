@@ -710,7 +710,6 @@ def ensure_priority_sources(session):
         ("Hamster Garage","Ashby","hamstergarage"),
         ("Stellic","Ashby","stellic"),
         ("CareerSwift","Ashby","careerswift.ai"),
-        ("CrewBloom","Ashby","crewbloom"),
         ("TensorOps","Greenhouse","tensorops"),
         ("Motive","Greenhouse","gomotive"),
         ("Whippy","Ashby","whippy"),
@@ -727,6 +726,14 @@ def ensure_priority_sources(session):
         ("Smart Working Solutions","Lever","smart-working-solutions"),
     )
     added=0
+    # Disable retired/broken feeds instead of reporting the same network error
+    # on every hourly run.
+    for retired_provider,retired_slug in (("Ashby","crewbloom"),):
+        retired=session.scalar(select(Source).where(
+            Source.provider==retired_provider,Source.slug==retired_slug
+        ))
+        if retired and retired.active:
+            retired.active=False
     for company,provider,slug in specs:
         row=session.scalar(select(Source).where(Source.provider==provider,Source.slug==slug))
         if not row:
