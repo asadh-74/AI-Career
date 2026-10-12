@@ -230,6 +230,31 @@ def review_is_waiting_for_user(session,application_id):
     )).all()
     return bool(rows) and any(not (r.answer or "").strip() for r in rows)
 
+def review_requires_user(session,application_id):
+    """Return True only when an unresolved field genuinely requires the user.
+
+    Normal experience, project, motivation, preference and technology questions
+    are deliberately NOT blockers; LangGraph should try those itself.
+    """
+    rows=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application_id,
+        ReviewAnswer.resolved==False,
+    )).all()
+    hard_patterns=(
+        "captcha","verify you are human","assessment","take assessment",
+        "criminal","conviction","security clearance","background check",
+        "signature","attest","certify","privacy notice","privacy policy","terms of",
+        "use only my own words","no ai","ai-generated","artificial intelligence",
+        "date of birth","passport","national id",
+    )
+    for row in rows:
+        if (row.answer or "").strip():
+            continue
+        low=(row.label_key or "").lower()
+        if row.sensitive or any(token in low for token in hard_patterns):
+            return True
+    return False
+
 def resolve_review_fields(session,application_id):
     rows=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
     for row in rows:
@@ -613,7 +638,7 @@ def run(target_job_id_override=None):
             select(Application,Job)
             .join(Job,Application.job_id==Job.id)
             .where(
-                Application.status.in_(("ready_for_retry","ready_for_review")),
+                Application.status.in_(("ready_for_retry","ready_for_review","needs_human")),
                 Application.score>=cfg.min_match_score,
             )
             .order_by(Application.score.desc(),Application.created_at.asc())
@@ -621,9 +646,7 @@ def run(target_job_id_override=None):
         ).all()
         priority_jobs=[]
         for app_row,job_row in priority_apps:
-            if (job_row.company or "").strip().lower()=="canonical" and app_row.status!="ready_for_retry":
-                continue
-            if app_row.status=="ready_for_retry" and review_is_waiting_for_user(session,app_row.id):
+            if review_requires_user(session,app_row.id):
                 continue
             sent_row=session.scalar(select(JobStatus).where(JobStatus.job_id==job_row.id,JobStatus.status=="submitted"))
             if not sent_row:
@@ -653,15 +676,11 @@ def run(target_job_id_override=None):
             # to resume through LangGraph and are never inferred/reused.
             pre_existing=session.scalar(select(Application).where(Application.job_id==job.id))
             if (job.company or "").strip().lower()=="canonical":
-                review_ready=bool(
-                    pre_existing
-                    and pre_existing.status=="ready_for_retry"
-                    and not review_is_waiting_for_user(session,pre_existing.id)
-                )
-                if not review_ready:
+                hard_block=bool(pre_existing and review_requires_user(session,pre_existing.id))
+                if hard_block:
                     record_event(
                         session,job.id,"discovered","protected_fields_skip",
-                        "Waiting for explicit one-application review answers before automatic submission.",
+                        "A genuinely human-only legal/protected field is still unresolved.",
                         application_id=(pre_existing.id if pre_existing else None)
                     )
                     session.commit()
@@ -678,8 +697,8 @@ def run(target_job_id_override=None):
             sent=session.scalar(select(JobStatus).where(JobStatus.job_id==job.id,JobStatus.status=="submitted"))
             if (existing and existing.status=="applied") or sent:
                 stats["alreadyApplied"]+=1;continue
-            if existing and existing.status=="needs_human" and not target_job_id.isdigit() and review_is_waiting_for_user(session,existing.id):
-                record_event(session,job.id,"applying","awaiting_review","Waiting for the user to answer only the unresolved review fields.",application_id=existing.id)
+            if existing and existing.status=="needs_human" and not target_job_id.isdigit() and review_requires_user(session,existing.id):
+                record_event(session,job.id,"applying","awaiting_review","A genuinely human-only field is unresolved.",application_id=existing.id)
                 session.commit();continue
 
             research=research_job(session,job,profile)
