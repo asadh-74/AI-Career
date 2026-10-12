@@ -16,6 +16,14 @@ def ats_name(url:str)->str:
     if "ashbyhq.com" in host:return "ashby"
     if "smartrecruiters.com" in host:return "smartrecruiters"
     if "myworkdayjobs.com" in host or "workday" in host:return "workday"
+    if "workable.com" in host:return "workable"
+    if "recruitee.com" in host:return "recruitee"
+    if "teamtailor.com" in host:return "teamtailor"
+    if "bamboohr.com" in host:return "bamboohr"
+    if "icims.com" in host:return "icims"
+    if "personio.com" in host:return "personio"
+    if "indeed.com" in host:return "indeed"
+    if "glassdoor.com" in host:return "glassdoor"
     return "generic"
 
 
