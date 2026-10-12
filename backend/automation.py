@@ -687,9 +687,31 @@ def _sensitive_or_unknown_required(page,sensitive_filled=None):
             ])).lower()
             if "newsletter" in ident:continue
             if not any(tok in ident for tok in safe_tokens):
-                try:html=(field.evaluate("(el)=>el.outerHTML") or "")[:220]
-                except Exception:html=""
-                blockers.append(f"Unknown required field: {ident[:160] or 'unlabelled required field'} {html}")
+                visible_label=""
+                try:
+                    fid=(field.get_attribute("id") or "").strip()
+                    if fid:
+                        lab=root.locator(f'label[for="{fid}"]')
+                        if lab.count():
+                            visible_label=(lab.first.inner_text(timeout=500) or "").strip()
+                except Exception:pass
+                if not visible_label:
+                    try:
+                        wrapper=field.locator("xpath=ancestor::*[self::div or self::fieldset][1]")
+                        wrapper_text=(wrapper.inner_text(timeout=500) or "").strip()
+                        wrapper_text=re.sub(r"\s+"," ",wrapper_text)
+                        # Ashby inputs often have UUID names but a useful visible
+                        # question in the nearest container.
+                        if wrapper_text and len(wrapper_text)<=500:
+                            visible_label=wrapper_text
+                    except Exception:pass
+                label_text=re.sub(r"\s+"," ",visible_label).strip()
+                if label_text:
+                    blockers.append(f"Unknown required field: {label_text[:320]}")
+                else:
+                    try:html=(field.evaluate("(el)=>el.outerHTML") or "")[:220]
+                    except Exception:html=""
+                    blockers.append(f"Unknown required field: {ident[:160] or 'unlabelled required field'} {html}")
         except Exception:pass
 
     if blockers:
