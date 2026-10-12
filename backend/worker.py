@@ -434,6 +434,65 @@ def cleanup_false_review_fields(session):
     if fixed:session.flush()
     return fixed
 
+def persist_agent_answers(session,application_id,answers):
+    """Persist generated non-sensitive answers for this application only."""
+    saved=0
+    for item in answers or []:
+        if item.get("sensitive"):continue
+        label=clean_question(str(item.get("label") or "")).strip()[:500]
+        value=str(item.get("value") or "").strip()[:3000]
+        if not label or not value:continue
+        row=session.scalar(select(ReviewAnswer).where(
+            ReviewAnswer.application_id==application_id,
+            ReviewAnswer.label_key==label,
+        ))
+        if not row:
+            row=ReviewAnswer(
+                application_id=application_id,label_key=label,answer=value,
+                selector_hint=str(item.get("selector_hint") or "")[:500],
+                sensitive=False,resolved=False,
+            )
+            session.add(row)
+        else:
+            row.answer=value
+            row.selector_hint=str(item.get("selector_hint") or row.selector_hint or "")[:500]
+            row.sensitive=False
+            row.resolved=False
+            row.updated_at=datetime.now(timezone.utc)
+        saved+=1
+    if saved:session.flush()
+    return saved
+
+def reuse_review_answers(session,application_id):
+    """Reuse only prior explicit non-sensitive answers for the same normalized question."""
+    current=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id==application_id,
+        ReviewAnswer.resolved==False,
+        ReviewAnswer.sensitive==False,
+    )).all()
+    if not current:return 0
+    prior=session.scalars(select(ReviewAnswer).where(
+        ReviewAnswer.application_id!=application_id,
+        ReviewAnswer.sensitive==False,
+        ReviewAnswer.answer!="",
+    ).order_by(ReviewAnswer.updated_at.desc()).limit(600)).all()
+    memory={}
+    for row in prior:
+        key=clean_question(row.label_key or "").lower()
+        if key and key not in memory:
+            memory[key]=row.answer
+    reused=0
+    for row in current:
+        if (row.answer or "").strip():continue
+        key=clean_question(row.label_key or "").lower()
+        value=memory.get(key)
+        if value:
+            row.answer=value
+            row.updated_at=datetime.now(timezone.utc)
+            reused+=1
+    if reused:session.flush()
+    return reused
+
 def requeue_answered_reviews(session):
     """Retry only when saved/profile facts now resolve the outstanding fields.
 
