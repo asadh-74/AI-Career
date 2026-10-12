@@ -668,6 +668,9 @@ def ensure_priority_sources(session):
         ("Camunda","Ashby","camunda"),
         ("Supabase","Ashby","supabase"),
         ("fal","Ashby","fal-ai"),
+        ("Vercel","Greenhouse","vercel"),
+        ("Dataiku","Greenhouse","dataiku"),
+        ("Smart Working Solutions","Lever","smart-working-solutions"),
     )
     added=0
     for company,provider,slug in specs:
