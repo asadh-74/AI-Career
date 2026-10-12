@@ -249,7 +249,14 @@ def store_review_fields(session,application_id,job,result):
     # Mark old blockers resolved first; anything still blocking will be
     # re-opened below. This keeps the dashboard focused on the current form.
     old=session.scalars(select(ReviewAnswer).where(ReviewAnswer.application_id==application_id)).all()
-    for row in old: row.resolved=True
+    for row in old:
+        # Explicit protected answers belong to this application only. Keep them
+        # available across retries until a confirmed submission, then
+        # resolve_review_fields() clears them.
+        if row.sensitive and (row.answer or "").strip():
+            row.resolved=False
+        else:
+            row.resolved=True
 
     questions=result.get("review_fields") or extract_review_questions(result.get("reason",""))
     created=0
