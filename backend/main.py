@@ -394,6 +394,18 @@ def applications(session:Session=Depends(db)):
                     changed=True
         if changed:
             session.commit()
+    app_ids=[item.id for item,_ in rows]
+    milestone_events=session.scalars(
+        select(ApplicationEvent).where(ApplicationEvent.application_id.in_(app_ids))
+    ).all() if app_ids else []
+    events_by_app={}
+    for event in milestone_events:
+        if event.application_id is not None:
+            events_by_app.setdefault(event.application_id,set()).add(event.event_type)
+    submitted_job_ids=set(session.scalars(
+        select(JobStatus.job_id).where(JobStatus.status=="submitted")
+    ).all())
+
     output=[]
     for item,job in rows:
         row=app_out(item,job)
@@ -409,6 +421,13 @@ def applications(session:Session=Depends(db)):
         else:
             row["reviewQuestions"]=[]
             row["reviewQueued"]=False
+        event_types=events_by_app.get(item.id,set())
+        row["milestones"]={
+            "answersSaved":bool(event_types & {"review_answers_saved","review_answered"}),
+            "submissionAttempted":"attempt_started" in event_types,
+            "employerConfirmed":item.job_id in submitted_job_ids,
+            "needsAction":item.status=="needs_human",
+        }
         output.append(row)
     return output
 
@@ -570,6 +589,17 @@ def v3_dashboard(session:Session=Depends(db)):
     submitted=len(submitted_keys)
     needs=sum(1 for a in apps if a.status=='needs_human')
     failed=sum(1 for a in apps if a.status=='failed')
+    milestone_rows=session.scalars(
+        select(ApplicationEvent).where(ApplicationEvent.application_id.is_not(None))
+    ).all()
+    answers_saved=len({
+        e.application_id for e in milestone_rows
+        if e.event_type in {"review_answers_saved","review_answered"}
+    })
+    submission_attempted=len({
+        e.application_id for e in milestone_rows
+        if e.event_type=="attempt_started"
+    })
     avg=round(sum(m.probability for m in metrics)/max(1,len(metrics))) if metrics else 0
     stages={}
     latest={}
@@ -583,6 +613,10 @@ def v3_dashboard(session:Session=Depends(db)):
         'jobs':session.query(Job).count(),
         'applications':len(apps),
         'submitted':submitted,
+        'answersSaved':answers_saved,
+        'submissionAttempted':submission_attempted,
+        'employerConfirmed':submitted,
+        'needsAction':needs,
         'needsAttention':needs,
         'failed':failed,
         'averageProbability':avg,
