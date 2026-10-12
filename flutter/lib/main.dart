@@ -521,9 +521,9 @@ class _WorkspaceState extends State<Workspace> {
               if((a['draft']??'').toString().isNotEmpty)ExpansionTile(title:const Text('Read application draft'),children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(a['draft']??''))]),
               Wrap(spacing:8,runSpacing:8,children:[
                 OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Official form ↗')),
-                if(needs && reviewQuestions.isNotEmpty)FilledButton.icon(onPressed:()=>reviewWithAgent(a),icon:const Icon(Icons.auto_awesome),label:Text('Answer $unanswered field${unanswered==1?'':'s'} & retry')),
+                if(needs && reviewQuestions.isNotEmpty)FilledButton.icon(onPressed:()=>reviewWithAgent(a),icon:const Icon(Icons.auto_awesome),label:Text('Review blocker${unanswered==1?'':'s'} & retry')),
                 if(queued)const Chip(avatar:Icon(Icons.autorenew,size:16),label:Text('LangGraph retrying')),
-                if(needs)OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('Open form manually ↗')),
+                if(needs)OutlinedButton(onPressed:job==null?null:()=>open(job['applyUrl']),child:const Text('View official form ↗')),
                 if(!submitted)FilledButton.icon(onPressed:()=>confirmApplication(a),icon:const Icon(Icons.check_circle_outline),label:const Text('I submitted this')),
               ]),
             ])));
@@ -570,13 +570,14 @@ class _WorkspaceState extends State<Workspace> {
   )));
   Widget dashboardView()=>ListView(children:[
     Row(children:[Expanded(child:Text('Automation Dashboard',style:Theme.of(context).textTheme.headlineSmall)),Chip(label:Text('Threshold ${dashboard['threshold']??75}+'))]),
-    const SizedBox(height:8),const Text('Live Career Atlas v3 pipeline: discovery, scoring, form automation, submission evidence and recruiter follow-up.'),
+    const SizedBox(height:8),const Text('Autonomous pipeline: agents discover, score, tailor, fill, retry and submit. Review is only for genuine human-only blockers.'),
     const SizedBox(height:12),
     Wrap(spacing:10,runSpacing:10,children:[
       _statCard('Jobs',dashboard['jobs'],Icons.work_outline),
       _statCard('Applications',dashboard['applications'],Icons.description_outlined,onTap:()=>setState((){applicationView='all';tab=1;})),
       _statCard('Answers Saved',dashboard['answersSaved'],Icons.save_outlined,onTap:()=>setState((){applicationView='answers_saved';tab=1;})),
       _statCard('Submission Attempted',dashboard['submissionAttempted'],Icons.send_outlined,onTap:()=>setState((){applicationView='attempted';tab=1;})),
+      _statCard('Agent Autofilled',dashboard['agentAutofilled'],Icons.auto_awesome),
       _statCard('Employer Confirmed',dashboard['employerConfirmed'],Icons.verified_outlined,onTap:()=>setState((){applicationView='confirmed';tab=1;})),
       _statCard('Needs Action',dashboard['needsAction'],Icons.warning_amber_outlined,onTap:()=>setState((){applicationView='needs_action';tab=1;})),
       _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
