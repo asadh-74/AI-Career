@@ -79,7 +79,8 @@ class _WorkspaceState extends State<Workspace> {
   Map<String,dynamic> dashboard={};
   String query='', statusFilter='all', qualityMode='balanced';
   String applicationQuery='';
-  bool reviewOnly=false;
+  bool applicationView='all';
+  String applicationView='all';
   @override void initState(){super.initState();reload();}
   Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
@@ -200,7 +201,7 @@ class _WorkspaceState extends State<Workspace> {
             if(c.mounted)Navigator.pop(c);
             setState((){
               tab=1;
-              reviewOnly=false;
+              applicationView='all';
               applicationQuery=(job['title']??job['company']??job['id'].toString()).toString();
             });
             if(app==null){
@@ -417,8 +418,18 @@ class _WorkspaceState extends State<Workspace> {
     }))
   ]);
   Widget applicationsView(){
-    final reviewApps=applications.where((x)=>(x as Map)['status']=='needs_human').toList();
-    final base=reviewOnly?reviewApps:applications;
+    bool inView(Map a){
+      final milestones=(a['milestones'] as Map?) ?? const {};
+      switch(applicationView){
+        case 'answers_saved': return milestones['answersSaved']==true;
+        case 'attempted': return milestones['submissionAttempted']==true;
+        case 'confirmed': return milestones['employerConfirmed']==true;
+        case 'needs_action': return milestones['needsAction']==true;
+        default: return true;
+      }
+    }
+    final reviewApps=applications.where((x)=>((x as Map)['milestones'] as Map?)?['needsAction']==true).toList();
+    final base=applications.where((x)=>inView(x as Map)).toList();
     final needle=applicationQuery.trim().toLowerCase();
     final visible=base.where((item){
       if(needle.isEmpty)return true;
@@ -434,10 +445,10 @@ class _WorkspaceState extends State<Workspace> {
     return Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
       Row(children:[
         Expanded(child:Text('Applications',style:Theme.of(context).textTheme.headlineSmall)),
-        if(reviewOnly)Chip(label:Text('${reviewApps.length} need review'))
+        if(applicationView!='all')Chip(label:Text(applicationView.replaceAll('_',' ')))
       ]),
       const SizedBox(height:8),
-      Text('${jobStatuses.where((s)=>s['status']=='submitted').length} confirmed submitted · ${reviewApps.length} need review · ${applications.length} application records'),
+      Text('${dashboard['answersSaved']??0} answers saved · ${dashboard['submissionAttempted']??0} attempted · ${dashboard['employerConfirmed']??0} employer confirmed · ${dashboard['needsAction']??reviewApps.length} need action'),
       const SizedBox(height:10),
       TextField(
         onChanged:(x)=>setState(()=>applicationQuery=x),
@@ -455,8 +466,11 @@ class _WorkspaceState extends State<Workspace> {
       ),
       const SizedBox(height:8),
       Wrap(spacing:8,runSpacing:8,children:[
-        ChoiceChip(label:Text('All (${applications.length})'),selected:!reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=false)),
-        ChoiceChip(label:Text('Needs review (${reviewApps.length})'),selected:reviewOnly,onSelected:(_)=>setState(()=>reviewOnly=true)),
+        ChoiceChip(label:Text('All (${applications.length})'),selected:applicationView=='all',onSelected:(_)=>setState(()=>applicationView='all')),
+        ChoiceChip(label:Text('Answers saved (${dashboard['answersSaved']??0})'),selected:applicationView=='answers_saved',onSelected:(_)=>setState(()=>applicationView='answers_saved')),
+        ChoiceChip(label:Text('Submission attempted (${dashboard['submissionAttempted']??0})'),selected:applicationView=='attempted',onSelected:(_)=>setState(()=>applicationView='attempted')),
+        ChoiceChip(label:Text('Employer confirmed (${dashboard['employerConfirmed']??0})'),selected:applicationView=='confirmed',onSelected:(_)=>setState(()=>applicationView='confirmed')),
+        ChoiceChip(label:Text('Needs action (${dashboard['needsAction']??reviewApps.length})'),selected:applicationView=='needs_action',onSelected:(_)=>setState(()=>applicationView='needs_action')),
         OutlinedButton.icon(onPressed:locateSubmittedApplication,icon:const Icon(Icons.link),label:const Text('Paste confirmation URL')),
       ]),
       if(needle.isNotEmpty)Padding(
@@ -465,7 +479,7 @@ class _WorkspaceState extends State<Workspace> {
       ),
       const SizedBox(height:10),
       Expanded(child:visible.isEmpty
-        ? Center(child:Text(reviewOnly?'No applications currently need review.':'No application records yet.'))
+        ? Center(child:Text(applicationView=='needs_action'?'No applications currently need action.':'No applications in this view.'))
         : ListView(children:[
           ...visible.map((item){
             final a=item as Map;
@@ -561,9 +575,11 @@ class _WorkspaceState extends State<Workspace> {
     const SizedBox(height:12),
     Wrap(spacing:10,runSpacing:10,children:[
       _statCard('Jobs',dashboard['jobs'],Icons.work_outline),
-      _statCard('Applications',dashboard['applications'],Icons.description_outlined),
-      _statCard('Confirmed',dashboard['submitted'],Icons.check_circle_outline),
-      _statCard('Needs review',dashboard['needsAttention'],Icons.warning_amber_outlined,onTap:()=>setState((){reviewOnly=true;tab=1;})),
+      _statCard('Applications',dashboard['applications'],Icons.description_outlined,onTap:()=>setState((){applicationView='all';tab=1;})),
+      _statCard('Answers Saved',dashboard['answersSaved'],Icons.save_outlined,onTap:()=>setState((){applicationView='answers_saved';tab=1;})),
+      _statCard('Submission Attempted',dashboard['submissionAttempted'],Icons.send_outlined,onTap:()=>setState((){applicationView='attempted';tab=1;})),
+      _statCard('Employer Confirmed',dashboard['employerConfirmed'],Icons.verified_outlined,onTap:()=>setState((){applicationView='confirmed';tab=1;})),
+      _statCard('Needs Action',dashboard['needsAction'],Icons.warning_amber_outlined,onTap:()=>setState((){applicationView='needs_action';tab=1;})),
       _statCard('Avg probability','${dashboard['averageProbability']??0}%',Icons.insights_outlined),
     ]),
     const SizedBox(height:18),Text('Quality mode',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:7),
