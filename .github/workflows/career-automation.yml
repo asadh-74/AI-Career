@@ -1,4 +1,4 @@
-# direct-source-batch: 2026-10-12-target-enveritas-1668
+# direct-source-batch: 2026-10-12-target-canonical-junior-112
 name: Career Atlas Automation
 
 on:
@@ -39,7 +39,7 @@ jobs:
       ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
       AUTO_SUBMIT_BROWSER: "true"
       AUTONOMOUS_AGENT_ANSWERS: "true"
-      TARGET_JOB_ID: "1668"
+      TARGET_JOB_ID: "112"
       TAILOR_RESUME: "true"
       ENABLE_EMAIL_MONITOR: "true"
       IMAP_HOST: "imap.gmail.com"
