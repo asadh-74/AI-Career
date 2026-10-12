@@ -494,10 +494,10 @@ def reuse_review_answers(session,application_id):
     return reused
 
 def requeue_answered_reviews(session):
-    """Retry only when saved/profile facts now resolve the outstanding fields.
+    """Requeue applications whenever only agent-answerable fields remain.
 
-    The initial LangGraph run already performs autonomous repair rounds. We do
-    not endlessly retry an unanswered open-ended question on every schedule.
+    Human review is reserved for legal/protected/unknown facts, CAPTCHA and
+    assessments. Open-ended technical/project questions are LangGraph's job.
     """
     moved=0
     profile=load_profile()
@@ -522,11 +522,15 @@ def requeue_answered_reviews(session):
             ReviewAnswer.application_id==app.id,
             ReviewAnswer.resolved==False,
         )).all()
-        if rows and all((r.answer or "").strip() for r in rows) and not review_requires_user(session,app.id):
+        if rows and not review_requires_user(session,app.id):
+            # At least one unanswered non-sensitive row may remain; the
+            # autonomous answer generator will handle it from verified evidence.
+            if recent_attempt_count(session,app.id,6)>=1:
+                continue
             app.status="ready_for_retry"
-            app.receipt="New saved/profile facts resolve the outstanding fields. Autonomous retry queued."
+            app.receipt="Only agent-answerable fields remain. Autonomous retry queued."
             record_event(session,app.job_id,"applying","review_requeued",
-                         "Saved/profile facts now resolve all outstanding fields; retry restored.",
+                         "Only agent-answerable fields remain; LangGraph retry restored.",
                          application_id=app.id)
             moved+=1
     if moved:session.flush()
@@ -784,6 +788,22 @@ def ensure_priority_sources(session):
     if added:session.commit()
     return added
 
+def recent_attempt_count(session,application_id,hours=6):
+    cutoff=datetime.now(timezone.utc)-timedelta(hours=hours)
+    rows=session.scalars(select(ApplicationEvent).where(
+        ApplicationEvent.application_id==application_id,
+        ApplicationEvent.event_type=="attempt_started",
+        ApplicationEvent.created_at>=cutoff,
+    )).all()
+    return len(rows)
+
+def absorb_agent_answers(session,application_id,result):
+    """Persist generated answers from every retry round, not only the first pass."""
+    answers=result.pop("_agent_generated_answers",[]) or []
+    saved=persist_agent_answers(session,application_id,answers)
+    fields=((result.get("meta") or {}).get("agentGeneratedFields") or [])
+    return saved,fields
+
 def run(target_job_id_override=None):
     cfg=AutomationConfig.from_env()
     if not cfg.enabled:return {"status":"disabled","processed":0}
@@ -892,7 +912,7 @@ def run(target_job_id_override=None):
             select(Application,Job)
             .join(Job,Application.job_id==Job.id)
             .where(
-                Application.status.in_(("ready_for_retry","ready_for_review")),
+                Application.status.in_(("ready_for_retry","ready_for_review","needs_human","technical_blocked")),
                 Application.score>=cfg.min_match_score,
             )
             .order_by(Application.created_at.asc())
@@ -901,6 +921,8 @@ def run(target_job_id_override=None):
         priority_pairs=[]
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
+                continue
+            if app_row.status=="technical_blocked" and recent_attempt_count(session,app_row.id,6)>=1:
                 continue
             chosen_job=prefer_direct_duplicate(session,job_row)
             if not location_eligible(chosen_job,profile):
@@ -1037,9 +1059,7 @@ def run(target_job_id_override=None):
 
             result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=learned)
             state=result.get("status","failed")
-            generated_answers=result.pop("_agent_generated_answers",[]) or []
-            persisted_generated=persist_agent_answers(session,existing.id,generated_answers)
-            generated=((result.get("meta") or {}).get("agentGeneratedFields") or [])
+            persisted_generated,generated=absorb_agent_answers(session,existing.id,result)
             if generated:
                 stats["agentAnsweredFields"]=stats.get("agentAnsweredFields",0)+len(generated)
                 record_event(
@@ -1084,6 +1104,14 @@ def run(target_job_id_override=None):
                                      application_id=existing.id)
                         result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=smarter)
                         state=result.get("status","failed")
+                        saved_more,fields_more=absorb_agent_answers(session,existing.id,result)
+                        if fields_more:
+                            stats["agentAnsweredFields"]=stats.get("agentAnsweredFields",0)+len(fields_more)
+                            record_event(
+                                session,job.id,"applying","agent_autofill",
+                                f"LangGraph answered {len(fields_more)} additional grounded field(s) during self-repair.",
+                                application_id=existing.id,meta={"persisted":saved_more},
+                            )
 
             stats["processed"]+=1
             if state=="failed":
@@ -1093,6 +1121,14 @@ def run(target_job_id_override=None):
                     record_event(session,job.id,"applying","retry",f"Retrying recoverable failure: {kind}",application_id=existing.id)
                     result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=learned)
                     state=result.get("status","failed")
+                    saved_more,fields_more=absorb_agent_answers(session,existing.id,result)
+                    if fields_more:
+                        stats["agentAnsweredFields"]=stats.get("agentAnsweredFields",0)+len(fields_more)
+                        record_event(
+                            session,job.id,"applying","agent_autofill",
+                            f"LangGraph answered {len(fields_more)} additional grounded field(s) during retry.",
+                            application_id=existing.id,meta={"persisted":saved_more},
+                        )
 
             store_artifacts(session,existing.id,result)
             count_learned_successes(session,job,result)
