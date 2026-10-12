@@ -750,16 +750,23 @@ def run(target_job_id_override=None):
                 Application.status.in_(("ready_for_retry","ready_for_review","needs_human")),
                 Application.score>=cfg.min_match_score,
             )
-            .order_by(Application.score.desc(),Application.created_at.asc())
-            .limit(20)
+            .order_by(Application.created_at.asc())
+            .limit(80)
         ).all()
-        priority_jobs=[]
+        priority_pairs=[]
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
                 continue
+            if not location_eligible(job_row,profile):
+                continue
             sent_row=session.scalar(select(JobStatus).where(JobStatus.job_id==job_row.id,JobStatus.status=="submitted"))
             if not sent_row:
-                priority_jobs.append(job_row)
+                priority_pairs.append((app_row,job_row))
+        priority_pairs.sort(
+            key=lambda pair:(candidate_fit_priority(pair[1]),int(pair[0].score or 0)),
+            reverse=True,
+        )
+        priority_jobs=[job_row for _,job_row in priority_pairs[:25]]
         if priority_jobs:
             seen=set();ordered=[]
             for candidate in [*priority_jobs,*jobs]:
