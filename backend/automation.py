@@ -135,13 +135,33 @@ def naturalize_draft(job,draft):
 def smtp_ready():
     return all(os.getenv(k) for k in ("SMTP_HOST","SMTP_PORT","SMTP_USERNAME","SMTP_PASSWORD","SMTP_FROM"))
 
+def _smtp_send(msg):
+    if not smtp_ready():raise RuntimeError("SMTP is not configured")
+    with smtplib.SMTP(os.environ["SMTP_HOST"],int(os.environ["SMTP_PORT"]),timeout=30) as server:
+        server.starttls()
+        server.login(os.environ["SMTP_USERNAME"],os.environ["SMTP_PASSWORD"])
+        server.send_message(msg)
+
+
+def send_email_notification(to_address,subject,body):
+    """Send an owner-facing application/recruiter update using configured SMTP."""
+    if not smtp_ready():raise RuntimeError("SMTP is not configured")
+    if not to_address or "@" not in to_address:raise ValueError("Applicant notification email is missing")
+    msg=EmailMessage()
+    msg["From"]=os.environ["SMTP_FROM"]
+    msg["To"]=to_address
+    msg["Subject"]=(subject or "Career Atlas update")[:180]
+    msg.set_content((body or "")[:6000])
+    _smtp_send(msg)
+    return True
+
+
 def send_email_application(to_address,subject,body,filename,pdf):
     if not smtp_ready():raise RuntimeError("SMTP is not configured")
     msg=EmailMessage(); msg["From"]=os.environ["SMTP_FROM"]; msg["To"]=to_address; msg["Subject"]=subject
     msg.set_content(body)
     msg.add_attachment(pdf,maintype="application",subtype="pdf",filename=filename or "resume.pdf")
-    with smtplib.SMTP(os.environ["SMTP_HOST"],int(os.environ["SMTP_PORT"]),timeout=30) as server:
-        server.starttls(); server.login(os.environ["SMTP_USERNAME"],os.environ["SMTP_PASSWORD"]); server.send_message(msg)
+    _smtp_send(msg)
     return f"email:{to_address}"
 
 def _fill(page,label,value):
