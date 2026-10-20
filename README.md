@@ -4,7 +4,9 @@ Live at https://career-atlas-yhx1.onrender.com/
 
 ## What works
 
-- Flutter UI for web and Android: login, company boards, live listings, PDF CV/Resume upload, AI application preparation, official application links, and a review queue.
+- Flutter UI for web and Android: login, company boards, the full loaded job corpus (up to 10,000 rows), role/contract filters, PDF CV/Resume upload, AI application preparation, official application links, and a review queue.
+- Tailored resumes use the portfolio CV's navy section styling, are saved per job, and can be previewed as text or downloaded as a PDF before applying.
+- Email status is shown in Setup. IMAP reads incoming recruiter replies only; SMTP email applications require an explicitly listed recruiting address and do not provide job alerts.
 - FastAPI API with PostgreSQL persistence on Render (SQLite for local development), one-user password login, PDF text extraction, Greenhouse and Lever public company job feeds, deduplication, Gemini match rationale and a cover note. If Gemini fails, a clearly labeled local keyword estimate and generic cover note remain available.
 - **Find jobs** scans configured company boards on demand. This free Render configuration does not include scheduled scanning or instant updates.
 - The application queue never reports **Applied** without an actual employer confirmation recorded by the user.
