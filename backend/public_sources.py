@@ -36,14 +36,23 @@ def _store(session, rows):
         apply_url=_https(row.get("apply_url","")) or url
         if not url or not row.get("title"):
             continue
-        if session.scalar(select(Job.id).where(Job.url==url)):
-            continue
-        # Exact normalized-source duplicate guard. A second fingerprint guard
-        # in the worker catches semantically identical cross-board copies.
+        # Re-seen feed entries are still live; refresh their last-seen timestamp
+        # so stale listings naturally fall out of the application candidate window.
         company=_text(row.get("company") or "Unknown")[:160]
         title=_text(row.get("title"))[:300]
         location=_text(row.get("location") or "Remote")[:200]
-        if session.scalar(select(Job.id).where(Job.company==company,Job.title==title,Job.location==location)):
+        existing=session.scalar(select(Job).where(Job.url==url))
+        if not existing:
+            existing=session.scalar(select(Job).where(Job.company==company,Job.title==title,Job.location==location))
+        if existing:
+            existing.found_at=datetime.now(timezone.utc)
+            incoming_provider=_text(row.get("provider"))[:30]
+            direct={"Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters"}
+            if incoming_provider in direct and existing.provider not in direct:
+                existing.url=url
+                existing.apply_url=apply_url
+                existing.description=_text(row.get("description"))[:8000]
+                existing.provider=incoming_provider
             continue
         session.add(Job(
             url=url,
