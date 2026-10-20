@@ -133,6 +133,13 @@ def experience_eligible(job,doc)->bool:
         return False
     return True
 
+def recently_seen(job,days=14)->bool:
+    seen=getattr(job,"found_at",None)
+    if seen is None:return False
+    if seen.tzinfo is None:seen=seen.replace(tzinfo=timezone.utc)
+    return seen>=datetime.now(timezone.utc)-timedelta(days=days)
+
+
 def contract_project_role(job)->bool:
     text=((getattr(job,"title","") or "")+" "+(getattr(job,"description","") or "")[:5000]).lower()
     signals=("contract","freelance","project-based","project based","fixed-price","fixed price",
@@ -965,7 +972,7 @@ def run(target_job_id_override=None):
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
                 continue
-            if job_row.found_at < datetime.now(timezone.utc)-timedelta(days=14):
+            if not recently_seen(job_row,14):
                 continue
             if os.getenv("CONTRACT_PROJECT_ONLY","false").strip().lower() in {"1","true","yes","on"} and not contract_project_role(job_row):
                 continue
