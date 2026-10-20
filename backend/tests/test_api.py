@@ -11,6 +11,7 @@ os.environ['ADMIN_PASSWORD_HASH']=pbkdf2_sha256.hash('correct horse battery')
 from fastapi.testclient import TestClient
 import main
 import worker
+import automation
 
 client=TestClient(main.app)
 
@@ -173,3 +174,23 @@ def test_contract_project_role_filter():
     assert worker.contract_project_role(SimpleNamespace(title='Python API Engineer',description='6-month contract'))
     assert worker.contract_project_role(SimpleNamespace(title='Freelance FastAPI Developer',description='Build a dashboard'))
     assert not worker.contract_project_role(SimpleNamespace(title='Permanent Backend Engineer',description='Full-time role'))
+
+
+def test_email_notification_uses_configured_smtp_without_exposing_credentials(monkeypatch):
+    for key,value in {
+        'SMTP_HOST':'smtp.example.com','SMTP_PORT':'587',
+        'SMTP_USERNAME':'owner@example.com','SMTP_PASSWORD':'private-test-secret',
+        'SMTP_FROM':'owner@example.com',
+    }.items():monkeypatch.setenv(key,value)
+    sent=[]
+    class FakeSMTP:
+        def __init__(self,*args,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def starttls(self):pass
+        def login(self,*args):pass
+        def send_message(self,msg):sent.append(msg)
+    monkeypatch.setattr(automation.smtplib,'SMTP',FakeSMTP)
+    assert automation.send_email_notification('owner@example.com','Career Atlas update','Your application was confirmed.')
+    assert len(sent)==1 and sent[0]['To']=='owner@example.com'
+    assert 'private-test-secret' not in sent[0].as_string()
