@@ -125,3 +125,42 @@ def test_email_status_never_exposes_credentials(monkeypatch):
     assert data['imapConfigured'] is True
     assert 'private-test-secret' not in response.text
     assert data['mode']=='inbound_replies_only'
+
+
+def test_prepare_returns_visible_tailored_resume(monkeypatch):
+    h=headers()
+    with main.SessionLocal() as db:
+        job=main.Job(
+            url='https://example.com/jobs/resume-preview',
+            apply_url='https://example.com/jobs/resume-preview',
+            company='Example',title='Python Backend Engineer',
+            location='Remote',description='Build APIs with Python and FastAPI.',
+            provider='Example',
+        )
+        doc=main.Document(
+            kind='Resume',filename='resume.pdf',pdf=b'%PDF-test',
+            extracted_text='''ASAD HUSSAIN
+Islamabad, Pakistan | asadh1521@gmail.com
+PROFESSIONAL SUMMARY
+Software engineer with Python and FastAPI experience.
+TECHNICAL SKILLS
+Backend: Python, FastAPI, PostgreSQL
+PROFESSIONAL EXPERIENCE
+Backend Engineer | Example
+- Built APIs with Python.
+SELECTED PROJECTS
+Career Atlas | FastAPI
+- Built a job platform.
+EDUCATION
+B.E. Electrical Engineering | NUST''',
+        )
+        db.add_all([job,doc]);db.commit();job_id=job.id
+    monkeypatch.setattr(main,'ai_prepare',lambda job,doc:(82,'Relevant Python experience.','Dear Hiring Team.'))
+    prepared=client.post('/api/applications/prepare',headers=h,json={'job_id':job_id,'document_kind':'Resume'})
+    assert prepared.status_code==200
+    variant_id=prepared.json()['resumeVariantId']
+    preview=client.get(f'/api/v3/resume-variants/{variant_id}',headers=h)
+    assert preview.status_code==200
+    assert 'FastAPI' in preview.json()['extractedText']
+    pdf=client.get(f'/api/v3/resume-variants/file/{variant_id}',headers=h)
+    assert pdf.status_code==200 and pdf.headers['content-type']=='application/pdf'
