@@ -10,6 +10,7 @@ from passlib.hash import pbkdf2_sha256
 os.environ['ADMIN_PASSWORD_HASH']=pbkdf2_sha256.hash('correct horse battery')
 from fastapi.testclient import TestClient
 import main
+import worker
 
 client=TestClient(main.app)
 
@@ -165,3 +166,10 @@ B.E. Electrical Engineering | NUST''',
     assert 'Built a job platform.' in preview.json()['extractedText']
     pdf=client.get(f'/api/v3/resume-variants/file/{variant_id}',headers=h)
     assert pdf.status_code==200 and pdf.headers['content-type']=='application/pdf'
+
+
+def test_contract_project_role_filter():
+    from types import SimpleNamespace
+    assert worker.contract_project_role(SimpleNamespace(title='Python API Engineer',description='6-month contract'))
+    assert worker.contract_project_role(SimpleNamespace(title='Freelance FastAPI Developer',description='Build a dashboard'))
+    assert not worker.contract_project_role(SimpleNamespace(title='Permanent Backend Engineer',description='Full-time role'))
