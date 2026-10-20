@@ -4,12 +4,12 @@ Keep this file limited to facts already supported by the user's projects,
 experience, uploaded records, or explicit profile information.
 """
 
-RESUME_PROFILE_VERSION = "2026-10-10-v1"
+RESUME_PROFILE_VERSION = "2026-10-20-v1"
 
 CANONICAL_RESUME_TEXT = """ASAD HUSSAIN
 Islamabad, Pakistan | +92 320 4141092 | asadh1521@gmail.com
 LinkedIn: linkedin.com/in/asad-hussain92 | GitHub: github.com/asadh-74
-Portfolio: automation-portfolio-steel.vercel.app
+Portfolio: automation-portfolio-steel.vercel.app | Upwork: upwork.com/freelancers/~0161b839f2733215d1
 
 SOFTWARE ENGINEER | BACKEND, AGENTIC AI & AUTOMATION
 
