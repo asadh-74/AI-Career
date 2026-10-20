@@ -737,7 +737,7 @@ def process_recruiter_mail(session,doc,stats):
         session.add(row);matched_count+=1
         queue_owner_notification(
             stats,
-            f"Career Atlas: {kind if (kind := msg['classification']) else 'recruiter update'} from {job.company}",
+            f"Career Atlas: {msg['classification']} from {job.company}",
             f"A recruiter message matched your application.\n\nRole: {job.title}\nCompany: {job.company}\nFrom: {msg['sender']}\nSubject: {msg['subject']}\nType: {msg['classification']}\n\nOpen Career Atlas to read the full message and respond.",
         )
         kind=msg["classification"]
