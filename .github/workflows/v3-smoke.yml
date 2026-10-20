@@ -31,6 +31,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Compile backend
         run: python -m compileall .
+      - name: Run API regression tests
+        run: |
+          pip install pytest
+          pytest -q tests/test_api.py
       - name: Import v3 modules
         run: |
           python - <<'PY'
