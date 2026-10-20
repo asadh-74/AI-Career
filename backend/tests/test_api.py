@@ -126,7 +126,7 @@ def test_email_status_never_exposes_credentials(monkeypatch):
     assert data['monitorEnabled'] is True
     assert data['imapConfigured'] is True
     assert 'private-test-secret' not in response.text
-    assert data['mode']=='inbound_replies_only'
+    assert data['mode']=='inbound_replies_and_owner_notifications'
 
 
 def test_prepare_returns_visible_tailored_resume(monkeypatch):
