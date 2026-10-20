@@ -911,10 +911,13 @@ def run(target_job_id_override=None):
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
-            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(5000)).all()
+            fresh_cutoff=datetime.now(timezone.utc)-timedelta(days=14)
+            recent=session.scalars(select(Job).where(Job.found_at>=fresh_cutoff).order_by(Job.found_at.desc()).limit(5000)).all()
             direct=session.scalars(
-                select(Job).where(Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")))
-                .order_by(Job.found_at.desc()).limit(5000)
+                select(Job).where(
+                    Job.found_at>=fresh_cutoff,
+                    Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")),
+                ).order_by(Job.found_at.desc()).limit(5000)
             ).all()
             by_id={j.id:j for j in recent}
             for j in direct:by_id.setdefault(j.id,j)
@@ -961,6 +964,8 @@ def run(target_job_id_override=None):
         priority_pairs=[]
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
+                continue
+            if job_row.found_at < datetime.now(timezone.utc)-timedelta(days=14):
                 continue
             if os.getenv("CONTRACT_PROJECT_ONLY","false").strip().lower() in {"1","true","yes","on"} and not contract_project_role(job_row):
                 continue
