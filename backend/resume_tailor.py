@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
@@ -228,10 +229,11 @@ def build_tailored_resume(job, source_doc) -> TailoredDocument:
     styles=getSampleStyleSheet()
     body=ParagraphStyle("Body",parent=styles["BodyText"],fontName="Helvetica",fontSize=8.15,leading=9.35,spaceAfter=.7)
     small=ParagraphStyle("Small",parent=body,fontSize=7.9,leading=9.0)
-    title_style=ParagraphStyle("TitleX",parent=styles["Title"],fontName="Helvetica-Bold",fontSize=16,leading=17,alignment=TA_CENTER,spaceAfter=1)
+    navy=colors.HexColor("#203764")
+    title_style=ParagraphStyle("TitleX",parent=styles["Title"],fontName="Helvetica-Bold",fontSize=16,leading=17,alignment=TA_CENTER,textColor=navy,spaceAfter=1)
     center=ParagraphStyle("Center",parent=small,alignment=TA_CENTER)
     role_style=ParagraphStyle("Role",parent=body,fontName="Helvetica-Bold",fontSize=9.5,leading=10.5,alignment=TA_CENTER,spaceAfter=2)
-    section_style=ParagraphStyle("Section",parent=body,fontName="Helvetica-Bold",fontSize=9.1,leading=10,spaceBefore=2.4,spaceAfter=.5)
+    section_style=ParagraphStyle("Section",parent=body,fontName="Helvetica-Bold",fontSize=9.1,leading=10,textColor=navy,spaceBefore=2.4,spaceAfter=.5)
     bullet=ParagraphStyle("Bullet",parent=small,leftIndent=8,firstLineIndent=-5.5,spaceAfter=.35)
 
     def esc(s):
@@ -246,7 +248,7 @@ def build_tailored_resume(job, source_doc) -> TailoredDocument:
         rows=tailored_sections.get(section,[])
         if not rows:continue
         story.append(Paragraph(section,section_style))
-        story.append(HRFlowable(width="100%",thickness=.35,spaceBefore=0,spaceAfter=1.2))
+        story.append(HRFlowable(width="100%",thickness=.55,color=navy,spaceBefore=0,spaceAfter=1.2))
         for line in rows:
             safe=esc(line)
             if line.startswith("- "):
