@@ -92,6 +92,26 @@ def _tokens(text: str):
     }
 
 
+SECTION_ALIASES = {
+    "PROFESSIONAL SUMMARY": "PROFESSIONAL SUMMARY",
+    "SUMMARY": "PROFESSIONAL SUMMARY",
+    "TECHNICAL SKILLS": "TECHNICAL SKILLS",
+    "SKILLS": "TECHNICAL SKILLS",
+    "PROFESSIONAL EXPERIENCE": "PROFESSIONAL EXPERIENCE",
+    "WORK EXPERIENCE": "PROFESSIONAL EXPERIENCE",
+    "EXPERIENCE": "PROFESSIONAL EXPERIENCE",
+    "SELECTED PROJECTS": "SELECTED PROJECTS",
+    "PROJECTS": "SELECTED PROJECTS",
+    "PORTFOLIO PROJECTS": "SELECTED PROJECTS",
+    "EDUCATION": "EDUCATION",
+    "TRAINING & CERTIFICATIONS": "TRAINING & CERTIFICATIONS",
+    "CERTIFICATIONS": "TRAINING & CERTIFICATIONS",
+    "CERTIFICATES": "TRAINING & CERTIFICATIONS",
+    "TRAINING": "TRAINING & CERTIFICATIONS",
+    "PROFESSIONAL DEVELOPMENT": "TRAINING & CERTIFICATIONS",
+}
+
+
 def _sections(source: str) -> tuple[list[str], dict[str, list[str]]]:
     header=[]
     sections={name:[] for name in SECTION_NAMES}
@@ -100,9 +120,12 @@ def _sections(source: str) -> tuple[list[str], dict[str, list[str]]]:
         line=re.sub(r"\s+"," ",raw).strip()
         if not line:
             continue
-        if line in SECTION_NAMES:
-            current=line
+        canonical=SECTION_ALIASES.get(line.upper().rstrip(":").strip())
+        if canonical:
+            current=canonical
             continue
+        if line.startswith(("•","●","▪","◦","* ")):
+            line="- "+line[1:].strip()
         if current is None:
             header.append(line)
         else:
