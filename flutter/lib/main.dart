@@ -468,7 +468,7 @@ class _WorkspaceState extends State<Workspace> {
       body:Row(children:[
         if(wide)NavigationRail(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),labelType:NavigationRailLabelType.all,destinations:rail),
         Expanded(child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:1180),child:Padding(
-          padding:const EdgeInsets.all(16),
+          padding:EdgeInsets.all(wide?16:10),
           child:switch(tab){0=>jobsView(filtered),1=>applicationsView(),2=>submittedView(),3=>dashboardView(),_=>setupView()}
         ))))
       ])
