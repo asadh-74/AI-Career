@@ -126,7 +126,9 @@ def job_out(j):
     contract_terms=("contract","freelance","project-based","project based","fixed-price","fixed price","part-time","part time","temporary","short-term","short term","consultant")
     contract=any(term in title or term in description for term in contract_terms)
     relevant=any(term in title for term in role_terms)
-    fresh=(j.found_at or datetime.min.replace(tzinfo=timezone.utc)) >= datetime.now(timezone.utc)-timedelta(days=14)
+    seen=j.found_at or datetime.min.replace(tzinfo=timezone.utc)
+    if seen.tzinfo is None:seen=seen.replace(tzinfo=timezone.utc)
+    fresh=seen >= datetime.now(timezone.utc)-timedelta(days=14)
     return dict(id=j.id, company=j.company, title=j.title, location=j.location, url=j.url, applyUrl=j.apply_url,
                 provider=j.provider, foundAt=j.found_at.isoformat(), careerRelevant=relevant,
                 contractProject=contract, current=fresh)
