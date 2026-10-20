@@ -119,7 +119,15 @@ def db():
     with SessionLocal() as session: yield session
 
 def source_out(s): return dict(id=s.id, company=s.company, provider=s.provider, slug=s.slug, active=s.active)
-def job_out(j): return dict(id=j.id, company=j.company, title=j.title, location=j.location, url=j.url, applyUrl=j.apply_url, provider=j.provider, foundAt=j.found_at.isoformat())
+def job_out(j):
+    title=(j.title or "").lower()
+    description=(j.description or "").lower()
+    role_terms=("python","software engineer","software developer","backend","back-end","full stack","full-stack","fullstack","fastapi","api developer","web developer","ai engineer","machine learning engineer","ml engineer","automation","agentic","llm engineer","integration engineer")
+    contract_terms=("contract","freelance","project-based","project based","fixed-price","fixed price","part-time","part time","temporary","short-term","short term","consultant")
+    contract=any(term in title or term in description for term in contract_terms)
+    relevant=any(term in title for term in role_terms)
+    return dict(id=j.id, company=j.company, title=j.title, location=j.location, url=j.url, applyUrl=j.apply_url,
+                provider=j.provider, foundAt=j.found_at.isoformat(), careerRelevant=relevant, contractProject=contract)
 def app_out(a,job=None):
     out=dict(id=a.id, jobId=a.job_id, documentId=a.document_id, score=a.score, rationale=a.rationale, draft=a.draft, status=a.status, receipt=a.receipt)
     if job is not None:
@@ -135,6 +143,19 @@ def login(body: Login):
     return {'token': serializer.dumps('owner')}
 @app.get('/api/health')
 def health(): return {'status':'ok'}
+
+@app.get('/api/email/status', dependencies=[Depends(auth)])
+def email_status():
+    enabled=os.getenv("ENABLE_EMAIL_MONITOR","false").strip().lower() in {"1","true","yes","on"}
+    imap_configured=bool(os.getenv("IMAP_USERNAME") or os.getenv("SMTP_USERNAME")) and bool(os.getenv("IMAP_PASSWORD") or os.getenv("SMTP_PASSWORD"))
+    smtp_configured=all(os.getenv(k) for k in ("SMTP_HOST","SMTP_PORT","SMTP_USERNAME","SMTP_PASSWORD","SMTP_FROM"))
+    return {
+        "monitorEnabled":enabled,
+        "imapConfigured":imap_configured,
+        "smtpConfigured":smtp_configured,
+        "mode":"inbound_replies_only",
+        "message":"Email monitoring reads recruiter replies from your inbox. It does not submit applications or send job alerts."
+    }
 @app.get('/api/sources', dependencies=[Depends(auth)])
 def sources(session: Session=Depends(db)): return [source_out(x) for x in session.scalars(select(Source).order_by(Source.company)).all()]
 @app.post('/api/sources', dependencies=[Depends(auth)])
@@ -220,8 +241,10 @@ def scan_scheduled(x_scan_secret: str | None=Header(default=None),session:Sessio
     if not os.getenv('SCAN_SECRET') or not secrets.compare_digest(x_scan_secret or '',os.getenv('SCAN_SECRET','')):raise HTTPException(401,'Invalid scan secret')
     with httpx.Client(timeout=20) as client:return scan(session,client)
 @app.get('/api/jobs', dependencies=[Depends(auth)])
-def jobs(session:Session=Depends(db),limit:int=100):
-    return [job_out(x) for x in session.scalars(select(Job).order_by(Job.found_at.desc()).limit(min(max(limit,1),300))).all()]
+def jobs(session:Session=Depends(db),limit:int=5000):
+    # Return the entire current corpus (normally a few thousand rows) so client-side search
+    # and filters don't silently hide jobs after the newest 100/300.
+    return [job_out(x) for x in session.scalars(select(Job).order_by(Job.found_at.desc()).limit(min(max(limit,1),10000))).all()]
 
 @app.get('/api/job-statuses', dependencies=[Depends(auth)])
 def job_statuses(session:Session=Depends(db)):
@@ -384,14 +407,39 @@ def ai_prepare(job,doc):
 def prepare(body:PrepareIn,session:Session=Depends(db)):
     job=session.get(Job,body.job_id);doc=session.scalar(select(Document).where(Document.kind==body.document_kind))
     if not job or not doc:raise HTTPException(404,'Job or uploaded document not found')
+    variant=None
+    if os.getenv('TAILOR_RESUME','true').strip().lower() in {'1','true','yes','on'}:
+        from resume_tailor import build_tailored_resume
+        tailored=build_tailored_resume(job,doc)
+        variant=session.scalar(select(ResumeVariant).where(ResumeVariant.job_id==job.id))
+        if not variant:
+            variant=ResumeVariant(job_id=job.id,source_document_id=doc.id,filename=tailored.filename,
+                                  pdf=tailored.pdf,extracted_text=tailored.extracted_text,
+                                  strategy=f"CV-design | {tailored.strategy}")
+            session.add(variant)
+        else:
+            variant.source_document_id=doc.id;variant.filename=tailored.filename
+            variant.pdf=tailored.pdf;variant.extracted_text=tailored.extracted_text
+            variant.strategy=f"CV-design | {tailored.strategy}"
+        session.flush()
     existing=session.scalar(select(Application).where(Application.job_id==job.id))
-    if existing and not (existing.rationale.startswith('Local keyword estimate') and os.getenv('GEMINI_API_KEY')):return app_out(existing)
+    if existing and not (existing.rationale.startswith('Local keyword estimate') and os.getenv('GEMINI_API_KEY')):
+        result=app_out(existing)
+        if variant:result.update(resumeVariantId=variant.id,resumeFilename=variant.filename)
+        session.commit()
+        return result
     score,rationale,draft=ai_prepare(job,doc)
     if existing:
         existing.score=score;existing.rationale=rationale;existing.draft=draft
-        session.commit();session.refresh(existing);return app_out(existing)
+        session.commit();session.refresh(existing)
+        result=app_out(existing)
+        if variant:result.update(resumeVariantId=variant.id,resumeFilename=variant.filename)
+        return result
     item=Application(job_id=job.id,document_id=doc.id,score=score,rationale=rationale,draft=draft)
-    session.add(item);session.commit();session.refresh(item);return app_out(item)
+    session.add(item);session.commit();session.refresh(item)
+    result=app_out(item)
+    if variant:result.update(resumeVariantId=variant.id,resumeFilename=variant.filename)
+    return result
 @app.get('/api/applications', dependencies=[Depends(auth)])
 def applications(session:Session=Depends(db)):
     rows=session.execute(
@@ -914,6 +962,23 @@ def v3_resume_variants(session:Session=Depends(db)):
         'id':v.id,'jobId':j.id,'company':j.company,'title':j.title,'filename':v.filename,
         'strategy':v.strategy,'createdAt':v.created_at.isoformat()
     } for v,j in rows]
+
+@app.get('/api/v3/resume-variants/{variant_id}', dependencies=[Depends(auth)])
+def v3_resume_variant_detail(variant_id:int,session:Session=Depends(db)):
+    item=session.get(ResumeVariant,variant_id)
+    if not item: raise HTTPException(404,'Resume variant not found')
+    return {
+        'id':item.id,'filename':item.filename,'strategy':item.strategy,
+        'createdAt':item.created_at.isoformat(),'extractedText':item.extracted_text,
+    }
+
+@app.get('/api/v3/resume-variants/file/{variant_id}', dependencies=[Depends(auth)])
+def v3_resume_variant_file(variant_id:int,session:Session=Depends(db)):
+    from fastapi.responses import Response
+    item=session.get(ResumeVariant,variant_id)
+    if not item: raise HTTPException(404,'Resume variant not found')
+    return Response(content=item.pdf,media_type='application/pdf',
+                    headers={'Content-Disposition':f'attachment; filename="{item.filename}"'})
 
 @app.get('/api/v3/artifacts/{application_id}', dependencies=[Depends(auth)])
 def v3_artifacts(application_id:int,session:Session=Depends(db)):
