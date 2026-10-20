@@ -93,3 +93,35 @@ def test_gemini_rejection_has_honest_local_fallback(monkeypatch):
     assert 'Local keyword estimate' in rationale and 'HTTP 429' in rationale
     assert 'not an AI assessment' in rationale
     assert 'Acme' in draft
+
+
+def test_job_feed_exposes_large_corpus_and_role_contract_facets():
+    from datetime import datetime, timezone
+    h=headers()
+    with main.SessionLocal() as db:
+        db.add(main.Job(
+            url='https://example.com/jobs/contract-python',
+            apply_url='https://example.com/jobs/contract-python',
+            company='Example',title='Python Backend Engineer - Contract',
+            location='Remote',description='Build FastAPI APIs on a fixed price project.',
+            provider='Example',found_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+    response=client.get('/api/jobs?limit=5000',headers=h)
+    assert response.status_code==200
+    job=next(x for x in response.json() if x['company']=='Example')
+    assert job['careerRelevant'] is True
+    assert job['contractProject'] is True
+
+def test_email_status_never_exposes_credentials(monkeypatch):
+    h=headers()
+    monkeypatch.setenv('ENABLE_EMAIL_MONITOR','true')
+    monkeypatch.setenv('IMAP_USERNAME','candidate@example.com')
+    monkeypatch.setenv('IMAP_PASSWORD','private-test-secret')
+    response=client.get('/api/email/status',headers=h)
+    assert response.status_code==200
+    data=response.json()
+    assert data['monitorEnabled'] is True
+    assert data['imapConfigured'] is True
+    assert 'private-test-secret' not in response.text
+    assert data['mode']=='inbound_replies_only'
