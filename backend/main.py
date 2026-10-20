@@ -126,8 +126,10 @@ def job_out(j):
     contract_terms=("contract","freelance","project-based","project based","fixed-price","fixed price","part-time","part time","temporary","short-term","short term","consultant")
     contract=any(term in title or term in description for term in contract_terms)
     relevant=any(term in title for term in role_terms)
+    fresh=(j.found_at or datetime.min.replace(tzinfo=timezone.utc)) >= datetime.now(timezone.utc)-timedelta(days=14)
     return dict(id=j.id, company=j.company, title=j.title, location=j.location, url=j.url, applyUrl=j.apply_url,
-                provider=j.provider, foundAt=j.found_at.isoformat(), careerRelevant=relevant, contractProject=contract)
+                provider=j.provider, foundAt=j.found_at.isoformat(), careerRelevant=relevant,
+                contractProject=contract, current=fresh)
 def app_out(a,job=None):
     out=dict(id=a.id, jobId=a.job_id, documentId=a.document_id, score=a.score, rationale=a.rationale, draft=a.draft, status=a.status, receipt=a.receipt)
     if job is not None:
@@ -219,7 +221,13 @@ def scan(session, client):
             for row in fetch_board(client,source):
                 url=urlparse(row['url'])
                 if url.scheme!='https' or not url.hostname: continue
-                if session.scalar(select(Job.id).where(Job.url==row['url'])): continue
+                existing=session.scalar(select(Job).where(Job.url==row['url']))
+                if existing:
+                    for key in ("apply_url","company","title","location","description","provider"):
+                        value=row.get(key)
+                        if value is not None: setattr(existing,key,value)
+                    existing.found_at=datetime.now(timezone.utc)
+                    continue
                 session.add(Job(**row));added+=1
             session.commit()
         except (httpx.HTTPError, ValueError, KeyError) as exc:
