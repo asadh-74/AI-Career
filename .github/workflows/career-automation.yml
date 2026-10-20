@@ -41,6 +41,7 @@ jobs:
       AUTONOMOUS_AGENT_ANSWERS: "true"
       TARGET_JOB_ID: ""
       TAILOR_RESUME: "true"
+      CONTRACT_PROJECT_ONLY: "true"
       ENABLE_EMAIL_MONITOR: "true"
       IMAP_HOST: "imap.gmail.com"
       CREWAI_LLM: ""
