@@ -225,7 +225,7 @@ def build_tailored_resume(job, source_doc) -> TailoredDocument:
     # Header keeps verified identity/contact lines; the generic source title is
     # replaced by a target-family headline.
     name=header[0] if header else "ASAD HUSSAIN"
-    contact=[x for x in header[1:] if not re.search(r"SOFTWARE ENGINEER|BACKEND|AGENTIC|AUTOMATION",x,re.I)]
+    contact=[x for x in header[1:] if not re.match(r"^(?:SOFTWARE ENGINEER|BACKEND\\s*/|AI\\s*/|AUTOMATION\\b|FULL.?STACK\\b|EMBEDDED\\b)",x,re.I)]
     target_line=f"{family} | Target: {job.title}"
 
     tailored_sections={
@@ -260,7 +260,12 @@ def build_tailored_resume(job, source_doc) -> TailoredDocument:
     bullet=ParagraphStyle("Bullet",parent=small,leftIndent=8,firstLineIndent=-5.5,spaceAfter=.35)
 
     def esc(s):
-        return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        safe=s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
+        return re.sub(
+            r"https?://[^\\s|]+",
+            lambda match: f'<link href="{match.group(0)}" color="#1A4D8F" underline="1">{match.group(0)}</link>',
+            safe,
+        )
 
     story=[Paragraph(esc(name),title_style)]
     for line in contact[:4]:
