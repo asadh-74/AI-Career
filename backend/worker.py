@@ -918,14 +918,13 @@ def run(target_job_id_override=None):
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
-            fresh_cutoff=datetime.now(timezone.utc)-timedelta(days=14)
-            recent=session.scalars(select(Job).where(Job.found_at>=fresh_cutoff).order_by(Job.found_at.desc()).limit(5000)).all()
+            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(5000)).all()
+            recent=[candidate for candidate in recent if recently_seen(candidate,14)]
             direct=session.scalars(
-                select(Job).where(
-                    Job.found_at>=fresh_cutoff,
-                    Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")),
-                ).order_by(Job.found_at.desc()).limit(5000)
+                select(Job).where(Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")))
+                .order_by(Job.found_at.desc()).limit(5000)
             ).all()
+            direct=[candidate for candidate in direct if recently_seen(candidate,14)]
             by_id={j.id:j for j in recent}
             for j in direct:by_id.setdefault(j.id,j)
             recent=list(by_id.values())
