@@ -142,6 +142,7 @@ def test_prepare_returns_visible_tailored_resume(monkeypatch):
         )
         extracted='''ASAD HUSSAIN
 Islamabad, Pakistan | asadh1521@gmail.com
+Portfolio: https://automation-portfolio-steel.vercel.app | Upwork: https://www.upwork.com/freelancers/~0161b839f2733215d1
 PROFESSIONAL SUMMARY
 Software engineer with Python and FastAPI experience.
 TECHNICAL SKILLS
@@ -169,6 +170,7 @@ B.E. Electrical Engineering | NUST'''
     assert preview.status_code==200
     assert 'FastAPI' in preview.json()['extractedText']
     assert 'Built a job platform.' in preview.json()['extractedText']
+    assert 'Upwork:' in preview.json()['extractedText']
     pdf=client.get(f'/api/v3/resume-variants/file/{variant_id}',headers=h)
     assert pdf.status_code==200 and pdf.headers['content-type']=='application/pdf'
 
