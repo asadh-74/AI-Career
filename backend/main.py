@@ -154,7 +154,7 @@ def email_status():
         "imapConfigured":imap_configured,
         "smtpConfigured":smtp_configured,
         "mode":"inbound_replies_only",
-        "message":"Email monitoring reads recruiter replies from your inbox. It does not submit applications or send job alerts."
+        "message":"Email monitoring reads recruiter replies from your inbox. SMTP sends submission and recruiter-reply notices when configured; email is not the application form."
     }
 @app.get('/api/sources', dependencies=[Depends(auth)])
 def sources(session: Session=Depends(db)): return [source_out(x) for x in session.scalars(select(Source).order_by(Source.company)).all()]
