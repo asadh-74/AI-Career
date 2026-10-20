@@ -12,7 +12,7 @@ import json
 import httpx
 from sqlalchemy import select
 
-from automation import AutomationConfig, host_allowed, load_profile, provider_allowed, set_profile_overrides
+from automation import AutomationConfig, host_allowed, load_profile, provider_allowed, set_profile_overrides, send_email_notification, smtp_ready
 from main import Application, Document, Job, JobStatus, SessionLocal, Source, ai_prepare, scan
 from public_sources import scan_public_sources
 from job_graph import run_application_graph
@@ -132,6 +132,37 @@ def experience_eligible(job,doc)->bool:
     if early_career and required>=3:
         return False
     return True
+
+def contract_project_role(job)->bool:
+    text=((getattr(job,"title","") or "")+" "+(getattr(job,"description","") or "")[:5000]).lower()
+    signals=("contract","freelance","project-based","project based","fixed-price","fixed price",
+             "part-time","part time","temporary","short-term","short term","consultant")
+    return any(term in text for term in signals)
+
+
+def queue_owner_notification(stats,subject,body):
+    stats.setdefault("_emailNotifications",[]).append({"subject":subject,"body":body})
+
+
+def deliver_owner_notifications(stats):
+    pending=stats.pop("_emailNotifications",[])
+    if not pending:return
+    address=(load_profile().get("email") or "").strip()
+    if not address:
+        stats["emailNotificationStatus"]="applicant email not configured"
+        return
+    if not smtp_ready():
+        stats["emailNotificationStatus"]="SMTP not configured"
+        return
+    sent=0
+    for item in pending:
+        try:
+            send_email_notification(address,item["subject"],item["body"])
+            sent+=1
+        except Exception as exc:
+            stats["emailNotificationError"]=type(exc).__name__
+    stats["emailNotificationsSent"]=sent
+
 
 def title_relevant(title:str)->bool:
     t=(title or "").lower()
@@ -704,6 +735,11 @@ def process_recruiter_mail(session,doc,stats):
         row=EmployerMessage(application_id=app.id,sender=msg["sender"],subject=msg["subject"],body=msg["body"],
                             classification=msg["classification"],action_required=msg["action_required"],received_at=msg["received_at"])
         session.add(row);matched_count+=1
+        queue_owner_notification(
+            stats,
+            f"Career Atlas: {kind if (kind := msg['classification']) else 'recruiter update'} from {job.company}",
+            f"A recruiter message matched your application.\n\nRole: {job.title}\nCompany: {job.company}\nFrom: {msg['sender']}\nSubject: {msg['subject']}\nType: {msg['classification']}\n\nOpen Career Atlas to read the full message and respond.",
+        )
         kind=msg["classification"]
         stage="employer_viewed"
         if kind=="interview":stage="interview"
@@ -875,10 +911,10 @@ def run(target_job_id_override=None):
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []
         else:
-            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(900)).all()
+            recent=session.scalars(select(Job).order_by(Job.found_at.desc()).limit(5000)).all()
             direct=session.scalars(
                 select(Job).where(Job.provider.in_(("Greenhouse","Lever","LeverEU","Ashby","SmartRecruiters")))
-                .order_by(Job.found_at.desc()).limit(900)
+                .order_by(Job.found_at.desc()).limit(5000)
             ).all()
             by_id={j.id:j for j in recent}
             for j in direct:by_id.setdefault(j.id,j)
@@ -903,6 +939,10 @@ def run(target_job_id_override=None):
                 if chosen and chosen.id not in seen_direct:
                     direct_jobs.append(chosen);seen_direct.add(chosen.id)
             jobs=direct_jobs
+            if os.getenv("CONTRACT_PROJECT_ONLY","false").strip().lower() in {"1","true","yes","on"}:
+                before=len(jobs)
+                jobs=[candidate for candidate in jobs if contract_project_role(candidate)]
+                stats["nonContractJobsSkipped"]=before-len(jobs)
             session.flush()
 
         # Applications that are already prepared and safe for autonomous
@@ -921,6 +961,8 @@ def run(target_job_id_override=None):
         priority_pairs=[]
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
+                continue
+            if os.getenv("CONTRACT_PROJECT_ONLY","false").strip().lower() in {"1","true","yes","on"} and not contract_project_role(job_row):
                 continue
             if app_row.status=="technical_blocked" and recent_attempt_count(session,app_row.id,6)>=1:
                 continue
@@ -1135,6 +1177,12 @@ def run(target_job_id_override=None):
             if state=="applied":
                 existing.status="applied";existing.receipt=result.get("receipt","browser-confirmed")
                 mark_status(session,job.id,"submitted",existing.receipt);stats["applied"]+=1
+                resume=session.scalar(select(ResumeVariant).where(ResumeVariant.job_id==job.id))
+                queue_owner_notification(
+                    stats,
+                    f"Career Atlas submitted: {job.title} at {job.company}",
+                    f"Employer submission was confirmed by the application agent.\n\nRole: {job.title}\nCompany: {job.company}\nMatch score: {existing.score}\nTailored resume: {resume.filename if resume else 'not available'}\nApplication link: {job.apply_url}\n\nOpen Career Atlas to review the resume and submission evidence.",
+                )
                 resolve_review_fields(session,existing.id)
                 record_event(session,job.id,"submitted","confirmed",existing.receipt,application_id=existing.id,meta=result.get("meta") or {})
             elif state in {"needs_human","ready"}:
@@ -1171,6 +1219,7 @@ def run(target_job_id_override=None):
         process_recruiter_mail(session,doc,stats)
         session.commit()
 
+    deliver_owner_notifications(stats)
     return stats
 
 def retry_application(application_id:int):
