@@ -76,17 +76,18 @@ class Workspace extends StatefulWidget { const Workspace({super.key}); @override
 class _WorkspaceState extends State<Workspace> {
   int tab=0; bool busy=false;
   List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
-  Map<String,dynamic> dashboard={};
+  Map<String,dynamic> dashboard={}, emailStatus={};
   String query='', statusFilter='all', qualityMode='balanced';
+  bool relevantOnly=true, contractOnly=true;
   String applicationQuery='';
   String applicationView='all';
   @override void initState(){super.initState();reload();}
-  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
+  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research'),api.request('GET','email/status')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];emailStatus=Map<String,dynamic>.from(result[13] as Map);qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
   Future<void> scan() async {setState(()=>busy=true);try{final result=await api.request('POST','scan');await reload();final errors=(result['errors'] as List).cast<String>();message('Added ${result['added']} jobs.${errors.isEmpty?'':' Board errors: ${errors.join(', ')}'}');}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
   Future<void> open(String url) async {final uri=Uri.tryParse(url);if(uri!=null && ['https','http'].contains(uri.scheme))await launchUrl(uri,mode:LaunchMode.externalApplication);}
   Future<void> upload(String kind) async {try{final result=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:['pdf'],withData:true);if(result==null)return;await api.upload(kind,result.files.single);await reload();message('$kind uploaded securely.');}catch(e){message('$e');}}
-  Future<void> prepare(Map job,String kind) async {setState(()=>busy=true);try{final a=await api.request('POST','applications/prepare',{'job_id':job['id'],'document_kind':kind});await reload();if(mounted)showDialog(context:context,builder:(c)=>AlertDialog(title:Text('Application draft · ${job['company']}'),content:SingleChildScrollView(child:Text('Score ${a['score']}\n\n${a['rationale']}\n\n${a['draft']}')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close')),TextButton(onPressed:(){Navigator.pop(c);open(job['applyUrl']);},child:const Text('Open official form'))]));}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
+  Future<void> prepare(Map job,String kind) async {setState(()=>busy=true);try{final a=await api.request('POST','applications/prepare',{'job_id':job['id'],'document_kind':kind});await reload();if(mounted)showDialog(context:context,builder:(c)=>AlertDialog(title:Text('Application draft · ${job['company']}'),content:SingleChildScrollView(child:Text('Score ${a['score']}\n\n${a['rationale']}\n\n${a['draft']}\n\nTailored resume: ${a['resumeFilename']??'not generated'}')),actions:[TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close')),if(a['resumeVariantId']!=null)TextButton(onPressed:()=>showResumePreview(a['resumeVariantId'] as int),child:const Text('Preview resume')),TextButton(onPressed:(){Navigator.pop(c);open(job['applyUrl']);},child:const Text('Open official form'))]));}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
   String statusFor(int jobId) => jobStatuses.where((s)=>s['jobId']==jobId).map((s)=>s['status'] as String).firstOrNull ?? 'not_submitted';
   Future<void> markStatus(Map job,String status) async {
     try { await api.request('POST','job-statuses',{'job_id':job['id'],'status':status});await reload();message(status=='submitted'?'Marked submitted: ${job['title']}':'Marked not submitted: ${job['title']}'); }
@@ -223,6 +224,31 @@ class _WorkspaceState extends State<Workspace> {
         ],
       )));
     }catch(e){message('$e');}
+  }
+
+  Future<void> showResumePreview(int id) async {
+    try {
+      final item=await api.request('GET','v3/resume-variants/$id') as Map;
+      if(!mounted)return;
+      showDialog(context:context,builder:(c)=>AlertDialog(
+        title:Text(item['filename']??'Tailored resume'),
+        content:SizedBox(width:720,child:SingleChildScrollView(child:SelectableText(
+          '${item['strategy']??''}\nGenerated ${item['createdAt']??''}\n\n${item['extractedText']??''}',
+          style:const TextStyle(fontFamily:'monospace',fontSize:12),
+        ))),
+        actions:[
+          TextButton(onPressed:()=>Navigator.pop(c),child:const Text('Close')),
+          FilledButton.icon(onPressed:()async{
+            try{
+              final bytes=await api.getBytes('v3/resume-variants/file/$id');
+              await FilePicker.platform.saveFile(fileName:(item['filename']??'Tailored_Resume.pdf').toString(),bytes:bytes);
+              if(c.mounted)Navigator.pop(c);
+              message('Tailored PDF downloaded. Review it before submitting an application.');
+            }catch(e){message('Could not download resume: $e');}
+          },icon:const Icon(Icons.download_outlined),label:const Text('Download PDF')),
+        ],
+      ));
+    }catch(e){message('Could not load tailored resume: $e');}
   }
 
   Future<void> showInterviewPrep(int applicationId) async {
@@ -414,7 +440,9 @@ class _WorkspaceState extends State<Workspace> {
     final filtered=jobs.where((x){
       final matchesText='${x['title']} ${x['company']} ${x['location']}'.toLowerCase().contains(query.trim().toLowerCase());
       final matchesStatus=statusFilter=='all'||statusFor(x['id'] as int)==statusFilter;
-      return matchesText&&matchesStatus;
+      final matchesRelevant=!relevantOnly||x['careerRelevant']==true;
+      final matchesContract=!contractOnly||x['contractProject']==true;
+      return matchesText&&matchesStatus&&matchesRelevant&&matchesContract;
     }).toList();
     const destinations=[
       NavigationDestination(icon:Icon(Icons.work_outline),label:'Jobs'),
@@ -451,7 +479,14 @@ class _WorkspaceState extends State<Workspace> {
     const SizedBox(height:8),Wrap(spacing:8,children:[
       for(final option in [('all','All'),('not_submitted','To apply'),('submitted','Submitted')])
         ChoiceChip(label:Text(option.$2),selected:statusFilter==option.$1,onSelected:(_)=>setState(()=>statusFilter=option.$1)),
-    ]),Text('Showing ${filtered.length} of ${jobs.length} roles'),
+    ]),
+    const SizedBox(height:6),
+    Wrap(spacing:8,runSpacing:6,children:[
+      FilterChip(label:const Text('My software / AI roles'),selected:relevantOnly,onSelected:(v)=>setState(()=>relevantOnly=v)),
+      FilterChip(label:const Text('Contract / project'),selected:contractOnly,onSelected:(v)=>setState(()=>contractOnly=v)),
+      ActionChip(label:const Text('Show all jobs'),onPressed:()=>setState(()=>{relevantOnly=false;contractOnly=false;})),
+    ]),
+    Text('Showing ${filtered.length} of ${jobs.length} roles · newest first'),
     const SizedBox(height:10),const Text('Explore other job sites (opens their live website)'),const SizedBox(height:5),
     Wrap(spacing:8,runSpacing:4,children:[
       OutlinedButton(onPressed:()=>open('https://pk.indeed.com/jobs?q=${Uri.encodeQueryComponent(query.trim().isEmpty ? 'software engineer' : query.trim())}&l=Pakistan'),child:const Text('Indeed ↗')),
@@ -700,11 +735,12 @@ class _WorkspaceState extends State<Workspace> {
     ))),
     const SizedBox(height:18),Text('Tailored resume variants',style:Theme.of(context).textTheme.titleMedium),
     if(resumeVariants.isEmpty)const Text('Verified-content resume variants are created only for roles that clear the selected quality threshold.'),
-    ...resumeVariants.take(8).map((v)=>Card(child:ListTile(
+    ...resumeVariants.take(12).map((v)=>Card(child:ListTile(
       leading:const Icon(Icons.picture_as_pdf_outlined),
-      title:Text('${v['title']} · ${v['company']}'),
+      title:Text('${v['title']} · ${v['company']}',maxLines:2,overflow:TextOverflow.ellipsis),
       subtitle:Text(v['strategy']??'',maxLines:2,overflow:TextOverflow.ellipsis),
-      trailing:Text(v['filename']??'')
+      trailing:IconButton(tooltip:'Preview tailored resume',icon:const Icon(Icons.visibility_outlined),onPressed:()=>showResumePreview(v['id'] as int)),
+      onTap:()=>showResumePreview(v['id'] as int),
     ))),
     const SizedBox(height:18),Text('Learned application fields',style:Theme.of(context).textTheme.titleMedium),
     if(questions.isEmpty)const Text('New reusable non-sensitive fields will appear here after the browser encounters them.'),
@@ -720,5 +756,10 @@ class _WorkspaceState extends State<Workspace> {
       trailing:Text((e['createdAt']??'').toString().replaceFirst('T',' ').split('.').first)
     ))),
   ]);
-  Widget setupView()=>ListView(children:[Text('Your setup',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:14),const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),const Text('Paste a Greenhouse, Lever, Ashby or SmartRecruiters careers URL to add another official company board. Career Atlas can auto-submit compatible forms, while CAPTCHAs, assessments and uncertain sensitive/legal questions remain review-only.')]);
+  Widget setupView()=>ListView(children:[Text('Your setup',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:14),const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),Card(child:ListTile(
+  leading:Icon(emailStatus['monitorEnabled']==true&&emailStatus['imapConfigured']==true?Icons.mark_email_read_outlined:Icons.mail_outline),
+  title:Text(emailStatus['monitorEnabled']==true&&emailStatus['imapConfigured']==true?'Recruiter email monitoring connected':'Recruiter email monitoring not connected'),
+  subtitle:Text((emailStatus['message']??'Email status unavailable.').toString()),
+)),
+const Text('Paste a Greenhouse, Lever, Ashby or SmartRecruiters careers URL to add another official company board. Some employers support a safe automated form flow; others require you to submit on their site. Career Atlas only marks an application submitted after employer confirmation.')]);
 }
