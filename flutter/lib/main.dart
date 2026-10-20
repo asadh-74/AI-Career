@@ -78,7 +78,7 @@ class _WorkspaceState extends State<Workspace> {
   List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
   Map<String,dynamic> dashboard={}, emailStatus={};
   String query='', statusFilter='all', qualityMode='balanced';
-  bool relevantOnly=true, contractOnly=true;
+  bool relevantOnly=true, contractOnly=true, currentOnly=true;
   String applicationQuery='';
   String applicationView='all';
   @override void initState(){super.initState();reload();}
@@ -442,7 +442,8 @@ class _WorkspaceState extends State<Workspace> {
       final matchesStatus=statusFilter=='all'||statusFor(x['id'] as int)==statusFilter;
       final matchesRelevant=!relevantOnly||x['careerRelevant']==true;
       final matchesContract=!contractOnly||x['contractProject']==true;
-      return matchesText&&matchesStatus&&matchesRelevant&&matchesContract;
+      final matchesCurrent=!currentOnly||x['current']==true;
+      return matchesText&&matchesStatus&&matchesRelevant&&matchesContract&&matchesCurrent;
     }).toList();
     const destinations=[
       NavigationDestination(icon:Icon(Icons.work_outline),label:'Jobs'),
@@ -484,7 +485,8 @@ class _WorkspaceState extends State<Workspace> {
     Wrap(spacing:8,runSpacing:6,children:[
       FilterChip(label:const Text('My software / AI roles'),selected:relevantOnly,onSelected:(v)=>setState(()=>relevantOnly=v)),
       FilterChip(label:const Text('Contract / project'),selected:contractOnly,onSelected:(v)=>setState(()=>contractOnly=v)),
-      ActionChip(label:const Text('Show all jobs'),onPressed:(){setState((){relevantOnly=false;contractOnly=false;});}),
+      FilterChip(label:const Text('Seen in last 14 days'),selected:currentOnly,onSelected:(v)=>setState(()=>currentOnly=v)),
+      ActionChip(label:const Text('Show all jobs'),onPressed:(){setState((){relevantOnly=false;contractOnly=false;currentOnly=false;});}),
     ]),
     Text('Showing ${filtered.length} of ${jobs.length} roles · newest first'),
     const SizedBox(height:10),const Text('Explore other job sites (opens their live website)'),const SizedBox(height:5),
