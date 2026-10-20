@@ -153,7 +153,7 @@ def email_status():
         "monitorEnabled":enabled,
         "imapConfigured":imap_configured,
         "smtpConfigured":smtp_configured,
-        "mode":"inbound_replies_only",
+        "mode":"inbound_replies_and_owner_notifications",
         "message":"Email monitoring reads recruiter replies from your inbox. SMTP sends submission and recruiter-reply notices when configured; email is not the application form."
     }
 @app.get('/api/sources', dependencies=[Depends(auth)])
