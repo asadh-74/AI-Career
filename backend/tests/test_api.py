@@ -114,6 +114,7 @@ def test_job_feed_exposes_large_corpus_and_role_contract_facets():
     job=next(x for x in response.json() if x['company']=='Example')
     assert job['careerRelevant'] is True
     assert job['contractProject'] is True
+    assert 'current' in job
 
 def test_email_status_never_exposes_credentials(monkeypatch):
     h=headers()
