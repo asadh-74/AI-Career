@@ -140,9 +140,7 @@ def test_prepare_returns_visible_tailored_resume(monkeypatch):
             location='Remote',description='Build APIs with Python and FastAPI.',
             provider='Example',
         )
-        doc=main.Document(
-            kind='Resume',filename='resume.pdf',pdf=b'%PDF-test',
-            extracted_text='''ASAD HUSSAIN
+        extracted='''ASAD HUSSAIN
 Islamabad, Pakistan | asadh1521@gmail.com
 PROFESSIONAL SUMMARY
 Software engineer with Python and FastAPI experience.
@@ -155,9 +153,14 @@ PROJECTS
 Career Atlas | FastAPI
 • Built a job platform.
 EDUCATION
-B.E. Electrical Engineering | NUST''',
-        )
-        db.add_all([job,doc]);db.commit();job_id=job.id
+B.E. Electrical Engineering | NUST'''
+        doc=db.scalar(main.select(main.Document).where(main.Document.kind=='Resume'))
+        if doc:
+            doc.filename='resume.pdf';doc.pdf=b'%PDF-test';doc.extracted_text=extracted
+        else:
+            doc=main.Document(kind='Resume',filename='resume.pdf',pdf=b'%PDF-test',extracted_text=extracted)
+            db.add(doc)
+        db.add(job);db.commit();job_id=job.id
     monkeypatch.setattr(main,'ai_prepare',lambda job,doc:(82,'Relevant Python experience.','Dear Hiring Team.'))
     prepared=client.post('/api/applications/prepare',headers=h,json={'job_id':job_id,'document_kind':'Resume'})
     assert prepared.status_code==200
