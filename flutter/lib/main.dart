@@ -484,7 +484,7 @@ class _WorkspaceState extends State<Workspace> {
     Wrap(spacing:8,runSpacing:6,children:[
       FilterChip(label:const Text('My software / AI roles'),selected:relevantOnly,onSelected:(v)=>setState(()=>relevantOnly=v)),
       FilterChip(label:const Text('Contract / project'),selected:contractOnly,onSelected:(v)=>setState(()=>contractOnly=v)),
-      ActionChip(label:const Text('Show all jobs'),onPressed:()=>setState(()=>{relevantOnly=false;contractOnly=false;})),
+      ActionChip(label:const Text('Show all jobs'),onPressed:(){setState((){relevantOnly=false;contractOnly=false;});}),
     ]),
     Text('Showing ${filtered.length} of ${jobs.length} roles · newest first'),
     const SizedBox(height:10),const Text('Explore other job sites (opens their live website)'),const SizedBox(height:5),
