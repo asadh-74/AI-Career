@@ -1,3 +1,31 @@
+## Automatic CV memory
+
+Uploaded selectable-text PDFs now populate a source-tracked profile automatically.
+Existing stored documents are indexed when the Profile page opens or the scheduled
+worker starts. No external model/API is called for extraction. Source hashes avoid
+re-parsing unchanged documents.
+
+The parser recognizes common English section headings and extracts explicit contact,
+education and expected-graduation fields. Skills, projects and experience remain
+verbatim evidence excerpts. Missing fields stay blank. Conflicting CV/Resume values
+are excluded until the user supplies an explicit value. Saved user values take
+precedence; source snippets and document names remain visible in Profile & answers.
+
+Agents retrieve saved answers first, then supported profile values and general CV
+excerpts. Existing grounded answer generation handles other supported prompts.
+Unanswered questions are grouped in **Needs your input**, with an **Answer once**
+action for reusable questions. Sensitive/legal questions stay in application review.
+Applicable blocked forms are reconsidered on the next scheduled worker run; saving
+an answer does not immediately send an application or email.
+
+The worker no longer replaces uploaded PDFs with a hard-coded resume or injects
+hard-coded education/location defaults. Previously overwritten document bytes cannot
+be reconstructed by this update. Check the displayed source filename and evidence;
+upload your current PDF if that stored source is outdated. Image-only/scanned PDFs
+still require OCR before upload. Parser coverage is conservative, not universal.
+
+---
+
 ## October 2026 workspace update
 
 The workspace now separates **Overview, Find jobs, Applications, Submitted, Inbox,

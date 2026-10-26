@@ -264,15 +264,9 @@ def verified_answer_for_review(profile,label):
     explicit=saved_answer(profile,label)
     if explicit:return explicit
     low=(label or "").lower()
-    if "which programming languages are you most familiar with" in low:
-        return ("Python is my strongest language for backend and automation work. "
-                "I have used Python with FastAPI and Flask for API/backend projects, "
-                "JavaScript and HTML/CSS for web interfaces, SQL with PostgreSQL/SQL Server/SQLite, "
-                "and C/C++ for embedded and systems-oriented projects.")
-    if any(token in low for token in ("server question_","cloud question_","enterprise question_","embedded question_","observability question_")):
-        return "Yes"
-    if any(token in low for token in ("desktop question_","performance question_","security question_","identity question_","packaging question_")):
-        return ""
+    from cv_memory import retrieve_answer
+    extracted=retrieve_answer(profile,label)
+    if extracted:return extracted
     mapping=(
         (("linkedin",),"linkedin"),
         (("github",),"github"),
@@ -862,11 +856,8 @@ def run(target_job_id_override=None):
         stats["falseReviewFieldsRemoved"]=cleanup_false_review_fields(session)
         stats["reviewFieldsBackfilled"]=backfill_review_queue(session)
         stats["noisyReviewFieldsRemoved"]=cleanup_noisy_review_fields(session)
-        try:
-            profile_extra=json.loads(get_setting(session,"applicant_profile_extra","{}") or "{}")
-            if not isinstance(profile_extra,dict):profile_extra={}
-        except Exception:
-            profile_extra={}
+        from cv_memory import effective_profile
+        profile_extra,cv_memory,_=effective_profile(session)
         set_profile_overrides(profile_extra)
         profile=load_profile()
         stats["answeredReviewsRequeued"]=requeue_answered_reviews(session)
@@ -900,22 +891,11 @@ def run(target_job_id_override=None):
 
         stored_doc=session.scalar(select(Document).where(Document.kind=="Resume")) or session.scalar(select(Document).where(Document.kind=="CV"))
         if not stored_doc:return {**stats,"status":"needs_setup","reason":"Upload a Resume or CV first"}
-        # Keep the live Career Atlas master resume synchronized with the
-        # corrected verified software/AI profile.
-        canonical_filename="Asad_Hussain_Software_AI_Resume_2026.pdf"
-        if stored_doc.filename!=canonical_filename or stored_doc.extracted_text!=CANONICAL_RESUME_TEXT:
-            stored_doc.filename=canonical_filename
-            stored_doc.extracted_text=CANONICAL_RESUME_TEXT
-            stored_doc.pdf=build_canonical_resume_pdf()
-            session.commit()
-        doc=SimpleNamespace(
-            id=stored_doc.id,
-            kind=getattr(stored_doc,"kind","Resume"),
-            filename=canonical_filename,
-            pdf=stored_doc.pdf,
-            extracted_text=CANONICAL_RESUME_TEXT,
-        )
-        stats["resumeProfileVersion"]=RESUME_PROFILE_VERSION
+        # The uploaded document remains authoritative; never replace it with a
+        # built-in resume during background processing.
+        doc=SimpleNamespace(id=stored_doc.id,kind=stored_doc.kind,filename=stored_doc.filename,
+                            pdf=stored_doc.pdf,extracted_text=stored_doc.extracted_text)
+        stats['resumeProfileVersion']=cv_memory['digest'][:12]
 
         if target_job_id.isdigit():
             target=session.get(Job,int(target_job_id));jobs=[target] if target else []

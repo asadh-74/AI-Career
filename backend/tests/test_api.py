@@ -269,3 +269,49 @@ def test_inbox_legacy_notification_is_not_reply():
 def test_sync_disabled_does_not_run_applications(monkeypatch):
     monkeypatch.setenv('ENABLE_EMAIL_MONITOR','false')
     assert client.post('/api/v3/messages/sync',headers=headers()).status_code==409
+
+def test_cv_memory_persists_refreshes_and_preserves_manual_values(monkeypatch):
+    from cv_memory import effective_profile,document_memory
+    from test_cv_memory import TEXT
+    monkeypatch.setenv('APPLICANT_PROFILE_JSON','{"email":"legacy@example.com"}')
+    with main.SessionLocal() as db:
+        for existing in db.scalars(main.select(main.Document)).all():existing.extracted_text=''
+        doc=db.scalar(main.select(main.Document).where(main.Document.kind=='CV'))
+        if not doc:
+            doc=main.Document(kind='CV',filename='current.pdf',pdf=b'%PDF-current',extracted_text=TEXT)
+            db.add(doc)
+        else:doc.filename='current.pdf';doc.extracted_text=TEXT;doc.pdf=b'%PDF-current'
+        db.flush()
+        main.set_setting(db,'applicant_profile_extra','{"name":"Explicit Name","saved_answers":[]}')
+        profile,memory,manual=effective_profile(db)
+        assert profile['name']=='Explicit Name'
+        assert profile['email']=='alex@example.com'
+        old_digest=memory['digest']
+        assert document_memory(db)['digest']==old_digest
+        doc.extracted_text=TEXT.replace('alex@example.com','new@example.com');db.flush()
+        profile,memory,_=effective_profile(db)
+        assert profile['email']=='new@example.com' and memory['digest']!=old_digest
+        assert doc.pdf==b'%PDF-current'
+        db.commit()
+    r=client.get('/api/v3/vault',headers=headers())
+    assert r.status_code==200
+    assert r.json()['provenance']['name']['source']=='Saved by you'
+    assert r.json()['provenance']['email']['source']=='current.pdf'
+
+def test_profile_conflict_blocks_environment_fallback(monkeypatch):
+    from cv_memory import effective_profile
+    from test_cv_memory import TEXT
+    monkeypatch.setenv('APPLICANT_PROFILE_JSON','{"email":"legacy@example.com"}')
+    with main.SessionLocal() as db:
+        resume=db.scalar(main.select(main.Document).where(main.Document.kind=='Resume'))
+        resume.extracted_text=TEXT
+        cv=db.scalar(main.select(main.Document).where(main.Document.kind=='CV'))
+        cv.extracted_text=TEXT.replace('alex@example.com','different@example.com')
+        main.set_setting(db,'applicant_profile_extra','{}')
+        db.flush()
+        profile,memory,_=effective_profile(db)
+        assert profile['email']==''
+        automation.set_profile_overrides(profile)
+        assert automation.load_profile()['email']==''
+        automation.set_profile_overrides({})
+        db.rollback()

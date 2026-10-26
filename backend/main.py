@@ -305,7 +305,10 @@ async def upload_document(kind:str=Form(...),file:UploadFile=File(...),session:S
     doc=session.scalar(select(Document).where(Document.kind==kind))
     if not doc:doc=Document(kind=kind,filename='',pdf=b'',extracted_text='');session.add(doc)
     doc.filename=Path(file.filename or f'{kind}.pdf').name[:200];doc.pdf=raw;doc.extracted_text=text
-    session.commit();return {'kind':kind,'filename':doc.filename,'characters':len(text)}
+    session.flush()
+    from cv_memory import document_memory
+    memory=document_memory(session)
+    session.commit();return {'kind':kind,'filename':doc.filename,'characters':len(text),'extractedFields':len(memory['profile']),'conflicts':len(memory['conflicts'])}
 @app.get('/api/documents', dependencies=[Depends(auth)])
 def documents(session:Session=Depends(db)):return [{'kind':x.kind,'filename':x.filename,'characters':len(x.extracted_text)} for x in session.scalars(select(Document)).all()]
 
@@ -1106,13 +1109,27 @@ from profile_vault import VaultInput, PROFILE_FIELDS
 
 @app.get('/api/v3/vault', dependencies=[Depends(auth)])
 def vault_get(session:Session=Depends(db)):
-    extra=json.loads(get_setting(session,'applicant_profile_extra','{}') or '{}')
-    try: base=json.loads(os.getenv('APPLICANT_PROFILE_JSON','{}') or '{}')
-    except ValueError:base={}
-    if not isinstance(base,dict):base={}
-    base.update(extra)
+    from cv_memory import effective_profile
+    base,memory,manual=effective_profile(session)
+    unresolved=session.scalars(select(ReviewAnswer).where(ReviewAnswer.resolved==False,ReviewAnswer.answer=='')).all()
+    from profile_vault import question_key
+    grouped={}
+    from worker import verified_answer_for_review
+    for item in unresolved:
+        if not item.sensitive and verified_answer_for_review(base,item.label_key):continue
+        key=question_key(item.label_key)
+        if key not in grouped:grouped[key]={'question':item.label_key,'sensitive':item.sensitive,'applications':[]}
+        grouped[key]['sensitive']=grouped[key]['sensitive'] or item.sensitive
+        if item.application_id not in grouped[key]['applications']:grouped[key]['applications'].append(item.application_id)
+    provenance={k:{'source':'Saved by you'} if k in manual else {'source':memory['provenance'][k]['document'],'quote':memory['provenance'][k]['quote']} if k in memory['provenance'] else {'source':'Configured profile'} for k in PROFILE_FIELDS if base.get(k)}
+    conflicts=[x for x in memory['conflicts'] if not manual.get(x['field'])]
+    session.commit()
     return {'profile':{k:str(base.get(k,'') or '') for k in PROFILE_FIELDS},
-            'answers':extra.get('saved_answers',[]),'fields':PROFILE_FIELDS}
+            'answers':manual.get('saved_answers',[]),'fields':PROFILE_FIELDS,
+            'provenance':provenance,'conflicts':conflicts,'documents':memory['documents'],
+            'extractedSections':memory['passages'],
+            'missingFields':[{'field':k,'label':PROFILE_FIELDS[k]} for k in ('name','email','phone') if not base.get(k)],
+            'needsInput':list(grouped.values())[:100]}
 
 @app.post('/api/v3/vault', dependencies=[Depends(auth)])
 def vault_save(body:VaultInput,session:Session=Depends(db)):

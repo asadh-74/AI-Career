@@ -755,7 +755,21 @@ const Text('Documents (private PDFs; selectable text required)'),...['CV','Resum
   ]);
   Widget profileView()=>ListView(children:[
     Text('Profile & answer library',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:8),
-    const Text('Write your facts once. Agents reuse saved profile fields and exact matching general questions. Leave unknown answers blank. Legal or sensitive answers stay in individual application review.'),
+    const Text('Your uploaded CV and Resume are read automatically. Agents use extracted facts and your saved answers. Only missing or conflicting information needs your input.'),
+    const SizedBox(height:14),
+    Card(child:Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Text('CV memory',style:Theme.of(context).textTheme.titleLarge),
+      if(((vault['documents'] as List?)??[]).isEmpty)const Text('Upload a selectable-text PDF in Resumes to begin.'),
+      for(final d in ((vault['documents'] as List?)??[]))Text('Source: ${d['filename']}'),
+      const SizedBox(height:8),const Text('Extraction runs locally without AI API charges. It does not guess salary, availability, grades, or work authorization.'),
+      TextButton.icon(onPressed:()=>setState(()=>tab=6),icon:const Icon(Icons.upload_file),label:const Text('Manage source documents')),
+    ]))),
+    Text('Needs your input',style:Theme.of(context).textTheme.titleLarge),
+    if(((vault['missingFields'] as List?)??[]).isEmpty && ((vault['conflicts'] as List?)??[]).isEmpty && ((vault['needsInput'] as List?)??[]).isEmpty)
+      const Padding(padding:EdgeInsets.all(12),child:Text('No missing basic details or unanswered application questions detected.')),
+    for(final f in ((vault['missingFields'] as List?)??[]))Card(child:ListTile(title:Text('Missing: ${f['label']}'),trailing:TextButton(onPressed:()=>saveOneFact(field:f['field'],label:f['label']),child:const Text('Answer once')))),
+    for(final f in ((vault['conflicts'] as List?)??[]))Card(child:ListTile(title:Text('Conflicting ${f['label']}'),subtitle:Text((f['candidates'] as List).map((c)=>'${c['value']} — ${c['document']}').join('\n')),trailing:TextButton(onPressed:()=>saveOneFact(field:f['field'],label:f['label']),child:const Text('Resolve')))),
+    for(final q in ((vault['needsInput'] as List?)??[]))Card(child:ListTile(title:Text(q['question']),subtitle:Text('Used by ${(q['applications'] as List).length} application(s)'),onTap:q['sensitive']==true?()=>setState(()=>tab=1):()=>saveOneFact(label:q['question']),trailing:Text(q['sensitive']==true?'Review':'Answer once'))),
     const SizedBox(height:16),Wrap(spacing:10,runSpacing:10,children:[
       FilledButton.icon(onPressed:()=>editVault(),icon:const Icon(Icons.edit_outlined),label:const Text('Edit profile & answers')),
       OutlinedButton.icon(onPressed:downloadTemplate,icon:const Icon(Icons.download_outlined),label:const Text('Download blank template')),
@@ -764,7 +778,9 @@ const Text('Documents (private PDFs; selectable text required)'),...['CV','Resum
     const Text('The template is a JSON file. You can also fill everything directly using Edit profile & answers. Import opens a review form before saving.'),
     const SizedBox(height:18),
     for(final entry in ((vault['profile'] as Map?)??{}).entries)
-      if(entry.value.toString().isNotEmpty)Card(child:ListTile(title:Text(((vault['fields'] as Map?)?[entry.key]??entry.key).toString()),subtitle:SelectableText(entry.value.toString()))),
+      if(entry.value.toString().isNotEmpty)Card(child:ListTile(title:Text(((vault['fields'] as Map?)?[entry.key]??entry.key).toString()),subtitle:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[SelectableText(entry.value.toString()),Text('Source: ${((vault['provenance'] as Map?)?[entry.key] as Map?)?['source']??'Saved profile'}',style:Theme.of(context).textTheme.bodySmall)]))),
+    Text('Evidence available to agents',style:Theme.of(context).textTheme.titleLarge),
+    for(final section in ((vault['extractedSections'] as List?)??[]))Card(child:ExpansionTile(title:Text(section['section']),subtitle:Text(section['document']),children:[Padding(padding:const EdgeInsets.all(16),child:SelectableText(section['text']))])),
     Text('Saved general answers',style:Theme.of(context).textTheme.titleLarge),
     if(((vault['answers'] as List?)??[]).isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No reusable answers saved yet. Add your strongest skills, project descriptions and general experience answers.')),
     for(final a in ((vault['answers'] as List?)??[]))Card(child:ListTile(title:Text(a['question']),subtitle:SelectableText(a['answer']))),
@@ -777,6 +793,27 @@ const Text('Documents (private PDFs; selectable text required)'),...['CV','Resum
       trailing:q['sensitive']==true?null:TextButton(onPressed:()=>mapQuestion(q as Map),child:const Text('Map'))
     ))),
   ]);
+
+  Future<void> saveOneFact({String? field,required String label}) async {
+    final value=TextEditingController();String? error;bool saving=false;
+    await showDialog(context:context,builder:(d)=>StatefulBuilder(builder:(d,local)=>AlertDialog(
+      title:Text(label),content:SizedBox(width:600,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        const Text('Save a factual answer once. Agents will reuse it on their next run.'),
+        TextField(controller:value,minLines:2,maxLines:8,decoration:const InputDecoration(labelText:'Your answer',border:OutlineInputBorder())),
+        if(error!=null)Text(error!,style:const TextStyle(color:Colors.red)),
+      ]))),actions:[TextButton(onPressed:saving?null:()=>Navigator.pop(d),child:const Text('Cancel')),
+        FilledButton(onPressed:saving?null:()async{
+          if(value.text.trim().isEmpty){local(()=>error='Enter an answer.');return;}
+          local((){saving=true;error=null;});
+          try{
+            final answers=List<dynamic>.from((vault['answers'] as List?)??[]);
+            if(field==null){answers.removeWhere((a)=>a['question'].toString().toLowerCase()==label.toLowerCase());answers.add({'question':label,'answer':value.text.trim()});}
+            await api.request('POST','v3/vault',{'profile':{if(field!=null)field:value.text.trim()},'answers':answers});
+            if(d.mounted)Navigator.pop(d);await reload();message('Saved. Applicable blocked forms will be reconsidered on the next agent run.');
+          }catch(e){if(d.mounted)local((){error='$e';saving=false;});}
+        },child:Text(saving?'Saving…':'Save answer'))]
+    )));value.dispose();
+  }
 
   Future<void> downloadTemplate() async {
     try{final bytes=await api.getBytes('v3/vault/template');await FilePicker.platform.saveFile(fileName:'Career_Atlas_Profile.json',bytes:bytes);}catch(e){message('$e');}

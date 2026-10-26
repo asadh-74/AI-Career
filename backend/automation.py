@@ -11,7 +11,6 @@ from email.message import EmailMessage
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 from ats_adapters import ats_name, fill_ats_fields, application_root
-from canonical_resume import CANONICAL_RESUME_TEXT
 from form_intelligence import fill_answer, unresolved_required, fill_phone_country, clean_question
 
 SENSITIVE_PATTERNS=("security clearance","criminal","conviction","disability","veteran","gender","race","ethnicity","religion","religious",
@@ -47,7 +46,7 @@ class AutomationConfig:
 
 _PROFILE_OVERRIDES={}
 SAFE_PROFILE_OVERRIDE_KEYS={
-    'name','email','phone','university','degree','degree_name','field_of_study','graduation_year','upwork','saved_answers',
+    'name','email','phone','university','degree','degree_name','field_of_study','graduation_year','upwork','saved_answers','cv_passages',
     "country","city","state_province","address_line1","postal_code",
     "linkedin","github","portfolio","availability",
     "salary_expectation_amount","salary_expectation_currency","salary_expectation_period",
@@ -67,19 +66,10 @@ def load_profile():
     if not raw:return dict(_PROFILE_OVERRIDES)
     try:
         data=json.loads(raw)
-        if not isinstance(data,dict):return {}
-        # Verified non-sensitive defaults from the canonical Career Atlas resume.
-        # Runtime profile values always win when explicitly configured.
-        data.setdefault("country","Pakistan")
-        data.setdefault("city","Islamabad")
-        data.setdefault("university","National University of Sciences and Technology (NUST)")
-        data.setdefault("degree","Bachelor's degree")
-        data.setdefault("degree_name","B.E. Electrical Engineering")
-        data.setdefault("field_of_study","Electrical Engineering")
-        data.setdefault("graduation_year","2027")
+        if not isinstance(data,dict):return dict(_PROFILE_OVERRIDES)
         data.update(_PROFILE_OVERRIDES)
         return data
-    except json.JSONDecodeError:return {}
+    except json.JSONDecodeError:return dict(_PROFILE_OVERRIDES)
 
 def load_sensitive_profile():
     """Explicit protected/demographic answers live separately from normal profile memory."""
@@ -426,26 +416,11 @@ def _verified_profile_answer_for_label(label,profile):
     explicit=saved_answer(profile,label)
     if explicit:return explicit
     low=(label or "").lower()
-    if "which programming languages are you most familiar with" in low:
-        return ("Python is my strongest language for backend and automation work. "
-                "I have used Python with FastAPI and Flask for API/backend projects, "
-                "JavaScript and HTML/CSS for web interfaces, SQL with PostgreSQL/SQL Server/SQLite, "
-                "and C/C++ for embedded and systems-oriented projects.")
-    # Canonical's project-interest question is a checkbox group. Select only
-    # areas supported by the verified project history.
-    canonical_interests={
-        "server question_":True,
-        "cloud question_":True,
-        "enterprise question_":True,
-        "embedded question_":True,
-        "observability question_":True,
-    }
-    for token,selected in canonical_interests.items():
-        if token in low:return selected
-    if any(token in low for token in ("desktop question_","performance question_","security question_","identity question_","packaging question_")):
-        return False
+    from cv_memory import retrieve_answer
+    extracted=retrieve_answer(profile,label)
+    if extracted:return extracted
     direct=(
-        (("full name","your name","name"),"name"),
+        (("full name","your name"),"name"),
         (("email",),"email"),
         (("phone","mobile"),"phone"),
         (("linkedin",),"linkedin"),
@@ -489,7 +464,7 @@ def _agent_may_answer(label):
         "use only my own words","generated content","ai-generated","artificial intelligence","plagiarism",
         "years of experience","how many years",
     )
-    return not any(token in low for token in blocked)
+    return not any(re.search(r"\b"+re.escape(token)+r"\b",low) for token in blocked)
 
 def _normalize_evidence(text):
     return re.sub(r"\s+"," ",(text or "")).strip().lower()
@@ -530,7 +505,7 @@ def generate_verified_application_answers(job,resume_text,draft,review_fields):
     if not key or not pending:
         return answers
 
-    evidence=(resume_text or CANONICAL_RESUME_TEXT or "")[:18000]
+    evidence=(resume_text or "")[:18000]
     labels=[re.sub(r"\s+"," ",str(x.get("label") or "")).strip()[:500] for x in pending[:8]]
     prompt=f"""You are the autonomous application-answering node in Career Atlas.
 Use ONLY the verified EVIDENCE below and the JOB context. Never invent facts.
