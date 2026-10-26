@@ -1,0 +1,26 @@
+{
+  "profile": {
+    "name": "",
+    "email": "",
+    "phone": "",
+    "country": "",
+    "city": "",
+    "state_province": "",
+    "address_line1": "",
+    "postal_code": "",
+    "linkedin": "",
+    "github": "",
+    "portfolio": "",
+    "upwork": "",
+    "availability": "",
+    "university": "",
+    "degree_name": "",
+    "degree": "",
+    "field_of_study": "",
+    "graduation_year": "",
+    "salary_expectation_amount": "",
+    "salary_expectation_currency": "",
+    "salary_expectation_period": ""
+  },
+  "answers": []
+}

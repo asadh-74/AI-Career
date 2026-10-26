@@ -5,6 +5,7 @@ Only documented/public feeds are used. Each adapter returns normalized Job field
 from __future__ import annotations
 
 import html
+from datetime import datetime, timezone
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urlparse

@@ -12,6 +12,43 @@ import re
 from datetime import datetime, timezone, timedelta
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
+
+
+class _MailText(HTMLParser):
+    def __init__(self):
+        super().__init__(); self.parts=[]; self.hidden=0
+    def handle_starttag(self, tag, attrs):
+        if tag in ('script','style'): self.hidden+=1
+        if tag in ('p','div','br','li','tr'): self.parts.append('\n')
+    def handle_endtag(self, tag):
+        if tag in ('script','style'): self.hidden=max(0,self.hidden-1)
+    def handle_data(self, data):
+        if not self.hidden:self.parts.append(data)
+
+
+def message_body(msg):
+    plain=[]; html=[]
+    for part in msg.walk():
+        if 'attachment' in str(part.get('Content-Disposition','')).lower():continue
+        if part.get_content_type() not in ('text/plain','text/html'):continue
+        try:
+            raw=part.get_payload(decode=True) or b''
+            value=raw.decode(part.get_content_charset() or 'utf-8',errors='replace')
+        except (LookupError,UnicodeError):value=raw.decode('utf-8',errors='replace')
+        (plain if part.get_content_type()=='text/plain' else html).append(value)
+    if any(x.strip() for x in plain):return '\n'.join(plain).strip()
+    parser=_MailText();parser.feed('\n'.join(html))
+    return re.sub(r'\n\s*\n+', '\n\n', ''.join(parser.parts)).strip()
+
+
+def excluded_kind(message):
+    subject=message.get('subject','').lower().strip()
+    body=message.get('body','').lower()
+    if subject.startswith('career atlas:') or ('a recruiter message matched your application.' in body and 'open career atlas' in body):
+        return 'app_notification'
+    if is_bulk_message(message):return 'job_recommendation'
+    return ''
 
 
 def _decode(value):
@@ -25,7 +62,8 @@ def _decode(value):
 
 def is_bulk_message(message):
     subject = message.get("subject", "").lower()
-    return bool(message.get("bulk")) or any(term in subject for term in (
+    sender=message.get('sender','').lower()
+    return bool(message.get("bulk")) or any(x in sender for x in ('newsletter','digest@','jobalerts@','job-alerts@')) or any(term in subject for term in (
         "might interest you", "recommended jobs", "recommended projects", "job alert",
         "jobs for you", "projects for you", "new jobs", "newsletter", "weekly digest",
         "daily digest", "job recommendations", "matched jobs",
@@ -69,15 +107,7 @@ def fetch_recent_messages(limit:int=200)->list[dict]:
             msg=email.message_from_bytes(raw)
             subject=_decode(msg.get("Subject",""))
             sender=_decode(msg.get("From",""))
-            body=""
-            if msg.is_multipart():
-                for part in msg.walk():
-                    if part.get_content_type()=="text/plain" and "attachment" not in (part.get("Content-Disposition","").lower()):
-                        try:body+=part.get_payload(decode=True).decode(part.get_content_charset() or "utf-8",errors="replace")
-                        except Exception:pass
-            else:
-                try:body=msg.get_payload(decode=True).decode(msg.get_content_charset() or "utf-8",errors="replace")
-                except Exception:body=""
+            body=message_body(msg)
             try:
                 received_at=parsedate_to_datetime(msg.get("Date", ""))
                 if received_at.tzinfo is None:received_at=received_at.replace(tzinfo=timezone.utc)
@@ -93,7 +123,7 @@ def fetch_recent_messages(limit:int=200)->list[dict]:
 def match_application(message,applications_with_jobs):
     # Never associate marketing digests with applications, even if their body
     # happens to mention a company or assessment keyword.
-    if is_bulk_message(message):return None
+    if excluded_kind(message):return None
     words=set(re.findall(r"[a-z0-9]+", (message.get("sender","")+" "+message.get("subject","")+" "+message.get("body","")).lower()))
     candidates=[]
     for app,job in applications_with_jobs:

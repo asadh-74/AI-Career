@@ -30,3 +30,17 @@ def test_list_header_overrides_company_match():
 
 def test_offer_keyword_not_enough():
     assert classify_message('Special offer','discount')[0] != 'offer'
+
+def test_self_notification_cannot_match():
+    msg={'sender':'owner@gmail.com','subject':'Career Atlas: recruiter_reply from Binance','body':'A recruiter message matched your application. Open Career Atlas'}
+    assert match_application(msg,[pair()]) is None
+
+def test_newsletter_sender_cannot_match():
+    assert match_application({'sender':'newsletters-noreply@linkedin.com','subject':'Mastering Excel','body':'Binance'},[pair()]) is None
+
+def test_html_only_email_is_readable():
+    from email.message import EmailMessage
+    from email_monitor import message_body
+    msg=EmailMessage();msg.set_content('<html><style>hidden</style><p>Your interview</p><p>Monday &amp; Tuesday</p></html>',subtype='html')
+    body=message_body(msg)
+    assert 'Your interview' in body and 'Monday & Tuesday' in body and 'hidden' not in body

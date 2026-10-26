@@ -18,7 +18,7 @@ from public_sources import scan_public_sources
 from job_graph import run_application_graph
 from research_agents import crew_research
 from resume_tailor import build_tailored_resume
-from email_monitor import fetch_recent_messages, match_application
+from email_monitor import fetch_recent_messages, match_application, excluded_kind
 from canonical_resume import CANONICAL_RESUME_TEXT, RESUME_PROFILE_VERSION, build_canonical_resume_pdf
 from form_intelligence import clean_question
 from v3_models import (
@@ -251,14 +251,18 @@ def learned_answers_for(session,url,profile):
     host=(urlparse(url or "").hostname or "").lower()
     rows=session.scalars(select(QuestionMemory).where(QuestionMemory.host==host,QuestionMemory.sensitive==False)).all()
     out=[]
+    from profile_vault import saved_answer
     for row in rows:
-        value=_profile_value(profile,row.answer_key)
+        value=saved_answer(profile,row.label_key) or _profile_value(profile,row.answer_key)
         if value not in (None,""):
             out.append({"label":row.label_key,"selector_hint":row.selector_hint,"value":value})
     return out
 
 def verified_answer_for_review(profile,label):
     """Resolve a review question from verified profile/resume facts only."""
+    from profile_vault import saved_answer
+    explicit=saved_answer(profile,label)
+    if explicit:return explicit
     low=(label or "").lower()
     if "which programming languages are you most familiar with" in low:
         return ("Python is my strongest language for backend and automation work. "
@@ -714,14 +718,21 @@ def process_recruiter_mail(session,doc,stats):
         if not app_job or not match_application(
             {"sender":old.sender,"subject":old.subject,"body":old.body},[app_job]):
             old.application_id=None
-            old.classification="needs_review"
+            old.classification=excluded_kind({'sender':old.sender,'subject':old.subject,'body':old.body}) or "needs_review"
             old.action_required=False
     session.flush()
 
     matched_count=0
     for msg in messages:
+        excluded=excluded_kind(msg)
+        if excluded=='app_notification':continue
         matched=match_application(msg,pairs)
         if not matched:
+            # Keep job alerts and application-like correspondence visible without
+            # claiming they came from a matched employer or sending alerts.
+            relevant=excluded or any(x in (msg['subject']+' '+msg['body']).lower() for x in ('application','interview','assessment','recruit','job opportunity'))
+            if relevant and not session.scalar(select(EmployerMessage).where(EmployerMessage.sender==msg['sender'],EmployerMessage.subject==msg['subject'],EmployerMessage.body==msg['body'])):
+                session.add(EmployerMessage(application_id=None,sender=msg['sender'],subject=msg['subject'],body=msg['body'],classification=excluded or 'needs_review',action_required=False,received_at=msg['received_at']))
             continue
         app,job=matched
         duplicate=session.scalar(select(EmployerMessage).where(
@@ -744,7 +755,7 @@ def process_recruiter_mail(session,doc,stats):
         elif kind=="rejection":stage="rejected"
         elif kind=="offer":stage="offer"
         record_event(session,job.id,stage,"employer_message",msg["subject"],application_id=app.id)
-        if kind=="interview" and not session.scalar(select(InterviewPrep).where(InterviewPrep.application_id==app.id)):
+        if doc is not None and kind=="interview" and not session.scalar(select(InterviewPrep).where(InterviewPrep.application_id==app.id)):
             focus=sorted(set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",job.description or "")) & set(re.findall(r"[A-Za-z][A-Za-z+#.]{2,}",doc.extracted_text or "")))[:20]
             prep=(f"Interview preparation for {job.company} — {job.title}\n\n"
                   f"Role focus from verified overlap: {', '.join(focus) if focus else 'review the job description and resume together'}.\n\n"

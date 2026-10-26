@@ -47,6 +47,7 @@ class AutomationConfig:
 
 _PROFILE_OVERRIDES={}
 SAFE_PROFILE_OVERRIDE_KEYS={
+    'name','email','phone','university','degree','degree_name','field_of_study','graduation_year','upwork','saved_answers',
     "country","city","state_province","address_line1","postal_code",
     "linkedin","github","portfolio","availability",
     "salary_expectation_amount","salary_expectation_currency","salary_expectation_period",
@@ -59,11 +60,11 @@ def set_profile_overrides(values):
     if not isinstance(values,dict):
         _PROFILE_OVERRIDES={}
         return
-    _PROFILE_OVERRIDES={k:v for k,v in values.items() if k in SAFE_PROFILE_OVERRIDE_KEYS and v not in (None,"")}
+    _PROFILE_OVERRIDES={k:v for k,v in values.items() if k in SAFE_PROFILE_OVERRIDE_KEYS and v is not None}
 
 def load_profile():
     raw=os.getenv("APPLICANT_PROFILE_JSON","").strip()
-    if not raw:return {}
+    if not raw:return dict(_PROFILE_OVERRIDES)
     try:
         data=json.loads(raw)
         if not isinstance(data,dict):return {}
@@ -421,6 +422,9 @@ def _fill_learned_answers(page,learned_answers):
     return filled
 
 def _verified_profile_answer_for_label(label,profile):
+    from profile_vault import saved_answer
+    explicit=saved_answer(profile,label)
+    if explicit:return explicit
     low=(label or "").lower()
     if "which programming languages are you most familiar with" in low:
         return ("Python is my strongest language for backend and automation work. "

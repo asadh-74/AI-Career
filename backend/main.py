@@ -1042,14 +1042,15 @@ def v3_profile_settings(session:Session=Depends(db)):
 
 @app.post('/api/v3/settings/profile', dependencies=[Depends(auth)])
 def v3_profile_settings_save(body:ApplicantProfileExtraIn,session:Session=Depends(db)):
-    raw=body.model_dump()
-    cleaned={}
+    raw=body.model_dump(exclude_unset=True)
+    cleaned=json.loads(get_setting(session,'applicant_profile_extra','{}') or '{}')
     for key,value in raw.items():
         if isinstance(value,str):
             value=value.strip()
-            if value:cleaned[key]=value
+            cleaned[key]=value
         elif value is not None:
             cleaned[key]=value
+        else:cleaned.pop(key,None)
     set_setting(session,'applicant_profile_extra',json.dumps(cleaned,ensure_ascii=False))
     session.commit()
     return {'ok':True,'savedFields':sorted(cleaned.keys())}
@@ -1057,9 +1058,10 @@ def v3_profile_settings_save(body:ApplicantProfileExtraIn,session:Session=Depend
 @app.get('/api/v3/messages', dependencies=[Depends(auth)])
 def v3_messages(session:Session=Depends(db)):
     rows=session.scalars(select(EmployerMessage).order_by(EmployerMessage.received_at.desc()).limit(200)).all()
+    from email_monitor import excluded_kind
     return [{
-        'id':x.id,'applicationId':x.application_id,'sender':x.sender,'subject':x.subject,
-        'body':x.body,'classification':x.classification,'actionRequired':x.action_required,
+        'id':x.id,'applicationId':None if excluded_kind({'sender':x.sender,'subject':x.subject,'body':x.body}) else x.application_id,'sender':x.sender,'subject':x.subject,
+        'body':x.body,'classification':excluded_kind({'sender':x.sender,'subject':x.subject,'body':x.body}) or x.classification,'actionRequired':x.action_required and not bool(excluded_kind({'sender':x.sender,'subject':x.subject,'body':x.body})),
         'receivedAt':x.received_at.isoformat()
     } for x in rows]
 
@@ -1096,6 +1098,93 @@ def v3_research(session:Session=Depends(db)):
         'eligibilityNotes':r.eligibility_notes,'qualityScore':r.quality_score,'source':r.source
     } for r,j in rows]
 
+
+
+# Profile & answer vault uses a portable JSON worksheet and the same persisted
+# settings the scheduled worker loads. Blank fields are explicit, not guesses.
+from profile_vault import VaultInput, PROFILE_FIELDS
+
+@app.get('/api/v3/vault', dependencies=[Depends(auth)])
+def vault_get(session:Session=Depends(db)):
+    extra=json.loads(get_setting(session,'applicant_profile_extra','{}') or '{}')
+    try: base=json.loads(os.getenv('APPLICANT_PROFILE_JSON','{}') or '{}')
+    except ValueError:base={}
+    if not isinstance(base,dict):base={}
+    base.update(extra)
+    return {'profile':{k:str(base.get(k,'') or '') for k in PROFILE_FIELDS},
+            'answers':extra.get('saved_answers',[]),'fields':PROFILE_FIELDS}
+
+@app.post('/api/v3/vault', dependencies=[Depends(auth)])
+def vault_save(body:VaultInput,session:Session=Depends(db)):
+    extra=json.loads(get_setting(session,'applicant_profile_extra','{}') or '{}')
+    extra.update(body.profile)
+    extra['saved_answers']=[x.model_dump() for x in body.answers]
+    set_setting(session,'applicant_profile_extra',json.dumps(extra,ensure_ascii=False))
+    session.commit()
+    return {'ok':True,'profileFields':len(body.profile),'answers':len(body.answers)}
+
+@app.get('/api/v3/vault/template', dependencies=[Depends(auth)])
+def vault_template():
+    from fastapi.responses import Response
+    data={'profile':{k:'' for k in PROFILE_FIELDS},'answers':[]}
+    return Response(json.dumps(data,indent=2),media_type='application/json',headers={'Content-Disposition':'attachment; filename="Career_Atlas_Profile.json"'})
+
+@app.post('/api/v3/messages/sync', dependencies=[Depends(auth)])
+def inbox_sync(session:Session=Depends(db)):
+    from worker import process_recruiter_mail
+    enabled=os.getenv('ENABLE_EMAIL_MONITOR','false').lower() in {'1','true','yes','on'}
+    if not enabled:raise HTTPException(409,'Email monitoring is disabled on this server. Scheduled worker and web server have separate configuration.')
+    if not (os.getenv('IMAP_USERNAME') or os.getenv('SMTP_USERNAME')) or not (os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD')):
+        raise HTTPException(409,'IMAP credentials are not configured on this server.')
+    stats={}
+    doc=session.scalar(select(Document).where(Document.kind=='Resume'))
+    process_recruiter_mail(session,doc,stats)
+    if stats.get('emailMonitorError'):
+        session.rollback()
+        raise HTTPException(502,'Mailbox sync failed. Check IMAP configuration and try again.')
+    session.commit()
+    # Deliberately do not dispatch notification queue or run job applications.
+    return {'ok':True,'matched':stats.get('recruiterMessages',0)}
+
+JOB_SITES=[
+    {'name':'Naukrigulf','url':'https://www.naukrigulf.com/','region':'Gulf','mode':'Open website / paste listing'},
+    {'name':'Bayt','url':'https://www.bayt.com/en/','region':'Middle East','mode':'Open website / paste listing'},
+    {'name':'Rozee','url':'https://www.rozee.pk/','region':'Pakistan','mode':'Open website / paste listing'},
+    {'name':'Indeed','url':'https://pk.indeed.com/','region':'Pakistan / worldwide','mode':'Open website / paste listing'},
+    {'name':'RemoteOK','url':'https://remoteok.com/','region':'Remote','mode':'Public feed'},
+    {'name':'Remotive','url':'https://remotive.com/','region':'Remote','mode':'Public feed'},
+    {'name':'Jobicy','url':'https://jobicy.com/','region':'Remote','mode':'Public feed'},
+    {'name':'Himalayas','url':'https://himalayas.app/','region':'Remote','mode':'Public feed'},
+    {'name':'We Work Remotely','url':'https://weworkremotely.com/','region':'Remote','mode':'Public feed'},
+    {'name':'Arbeitnow','url':'https://www.arbeitnow.com/','region':'Europe / remote','mode':'Public feed'},
+]
+
+@app.get('/api/v3/job-sites', dependencies=[Depends(auth)])
+def job_sites():return JOB_SITES
+
+class ListingInput(BaseModel):
+    url:str=Field(max_length=1000)
+    company:str=Field(min_length=1,max_length=160)
+    title:str=Field(min_length=1,max_length=300)
+    location:str=Field(default='',max_length=200)
+    description:str=Field(min_length=20,max_length=16000)
+
+@app.post('/api/v3/jobs/import', dependencies=[Depends(auth)])
+def import_listing(body:ListingInput,session:Session=Depends(db)):
+    try:
+        parsed=urlparse(body.url)
+        port=parsed.port
+    except ValueError:raise HTTPException(400,'Invalid listing URL')
+    host=(parsed.hostname or '').lower()
+    site=next((x for x in JOB_SITES if host==(urlparse(x['url']).hostname or '').removeprefix('www.') or host.endswith('.'+(urlparse(x['url']).hostname or '').removeprefix('www.'))),None)
+    if parsed.scheme!='https' or not site or parsed.username or parsed.password or port not in (None,443):
+        raise HTTPException(400,'Use an HTTPS listing URL from a website in Job sources.')
+    if not body.title.strip() or not body.company.strip():raise HTTPException(400,'Company and title are required')
+    existing=session.scalar(select(Job).where(Job.url==body.url))
+    if existing:return {'id':existing.id,'added':False}
+    row=Job(url=body.url,apply_url=body.url,company=body.company.strip(),title=body.title.strip(),location=body.location.strip(),description=body.description,provider=site['name'])
+    session.add(row);session.commit();session.refresh(row)
+    return {'id':row.id,'added':True}
 
 WEB=Path(__file__).parent/'web'
 if WEB.exists():

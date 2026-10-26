@@ -217,7 +217,55 @@ def test_invalid_email_remains_visible_without_new_mail(monkeypatch):
         db.commit()
         preserved=db.get(worker.EmployerMessage,mid)
         assert preserved.application_id is None
-        assert preserved.classification=='needs_review'
+        assert preserved.classification=='job_recommendation'
         assert not preserved.action_required
     msgs=client.get('/api/v3/messages',headers=headers()).json()
     assert any(m['id']==mid and m['body']=='Binance assessment' for m in msgs)
+
+def test_vault_roundtrip_and_worker_uses_saved_facts(monkeypatch):
+    h=headers()
+    body={'profile':{'name':'Test Applicant','availability':'Ten hours per week','github':'https://github.com/example'},'answers':[{'question':'What is your strongest skill?','answer':'Python backend development.'}]}
+    assert client.post('/api/v3/vault',headers=h,json=body).status_code==200
+    r=client.get('/api/v3/vault',headers=h).json()
+    assert r['profile']['name']=='Test Applicant'
+    assert r['answers']==body['answers']
+    with main.SessionLocal() as db:
+        import json
+        extra=json.loads(main.get_setting(db,'applicant_profile_extra','{}'))
+    monkeypatch.setenv('APPLICANT_PROFILE_JSON','')
+    automation.set_profile_overrides(extra)
+    assert automation.load_profile()['name']=='Test Applicant'
+    assert worker.verified_answer_for_review(automation.load_profile(),'What is your strongest skill?')=='Python backend development.'
+    automation.set_profile_overrides({})
+    assert client.post('/api/v3/settings/profile',headers=h,json={'city':'Test City'}).status_code==200
+    assert client.get('/api/v3/vault',headers=h).json()['profile']['availability']=='Ten hours per week'
+
+def test_vault_rejects_invalid_import_atomically():
+    h=headers()
+    before=client.get('/api/v3/vault',headers=h).json()
+    assert client.post('/api/v3/vault',headers=h,json={'profile':{'made_up':'value'}}).status_code==422
+    assert client.post('/api/v3/vault',headers=h,json={'answers':[{'question':'What is your passport number?','answer':'123'}]}).status_code==422
+    assert client.get('/api/v3/vault',headers=h).json()==before
+    assert client.get('/api/v3/vault/template').status_code==401
+    assert client.get('/api/v3/vault/template',headers=h).json()['answers']==[]
+
+def test_manual_listing_import_and_duplicates():
+    h=headers();body={'url':'https://www.naukrigulf.com/example-role-123','company':'Example','title':'Python contractor','description':'Build Python automation workflows and REST APIs.'}
+    r=client.post('/api/v3/jobs/import',headers=h,json=body)
+    assert r.status_code==200 and r.json()['added'] is True
+    assert client.post('/api/v3/jobs/import',headers=h,json=body).json()['added'] is False
+    body['url']='https://naukrigulf.com.evil.example/job'
+    assert client.post('/api/v3/jobs/import',headers=h,json=body).status_code==400
+    assert any(x['name']=='Naukrigulf' for x in client.get('/api/v3/job-sites',headers=h).json())
+
+def test_inbox_legacy_notification_is_not_reply():
+    h=headers()
+    with main.SessionLocal() as db:
+        x=main.EmployerMessage(sender='owner@gmail.com',subject='Career Atlas: recruiter_reply from Binance',body='A recruiter message matched your application. Open Career Atlas',classification='recruiter_reply',action_required=True)
+        db.add(x);db.commit();ident=x.id
+    row=next(x for x in client.get('/api/v3/messages',headers=h).json() if x['id']==ident)
+    assert row['classification']=='app_notification' and row['actionRequired'] is False
+
+def test_sync_disabled_does_not_run_applications(monkeypatch):
+    monkeypatch.setenv('ENABLE_EMAIL_MONITOR','false')
+    assert client.post('/api/v3/messages/sync',headers=headers()).status_code==409

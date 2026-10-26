@@ -74,7 +74,10 @@ class _GateState extends State<Gate> {
 
 class Workspace extends StatefulWidget { const Workspace({super.key}); @override State<Workspace> createState()=>_WorkspaceState(); }
 class _WorkspaceState extends State<Workspace> {
-  int tab=0; bool busy=false;
+  int tab=3; bool busy=false; bool syncingMail=false; String inboxFilter='replies';
+  final applicationSearch=TextEditingController();
+  Map<String,dynamic> vault={}; List<dynamic> jobSites=[];
+  @override void dispose(){applicationSearch.dispose();super.dispose();}
   List<dynamic> jobs=[],sources=[],documents=[],applications=[],jobStatuses=[],submittedApps=[],metrics=[],messages=[],followups=[],questions=[],resumeVariants=[],research=[];
   Map<String,dynamic> dashboard={}, emailStatus={};
   String query='', statusFilter='all', qualityMode='balanced';
@@ -82,7 +85,7 @@ class _WorkspaceState extends State<Workspace> {
   String applicationQuery='';
   String applicationView='all';
   @override void initState(){super.initState();reload();}
-  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research'),api.request('GET','email/status')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];emailStatus=Map<String,dynamic>.from(result[13] as Map);qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
+  Future<void> reload() async { try {final result=await Future.wait([api.request('GET','jobs'),api.request('GET','sources'),api.request('GET','documents'),api.request('GET','applications'),api.request('GET','job-statuses'),api.request('GET','applications/submitted'),api.request('GET','v3/dashboard'),api.request('GET','v3/metrics'),api.request('GET','v3/messages'),api.request('GET','v3/followups'),api.request('GET','v3/questions'),api.request('GET','v3/resume-variants'),api.request('GET','v3/research'),api.request('GET','email/status'),api.request('GET','v3/vault'),api.request('GET','v3/job-sites')]);if(mounted)setState((){jobs=result[0];sources=result[1];documents=result[2];applications=result[3];jobStatuses=result[4];submittedApps=result[5];dashboard=Map<String,dynamic>.from(result[6] as Map);metrics=result[7];messages=result[8];followups=result[9];questions=result[10];resumeVariants=result[11];research=result[12];emailStatus=Map<String,dynamic>.from(result[13] as Map);vault=Map<String,dynamic>.from(result[14] as Map);jobSites=result[15];qualityMode=(dashboard['qualityMode']??'balanced').toString();});}catch(e){message('$e');} }
   void message(String text){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(text)));}
   Future<void> scan() async {setState(()=>busy=true);try{final result=await api.request('POST','scan');await reload();final errors=(result['errors'] as List).cast<String>();message('Added ${result['added']} jobs.${errors.isEmpty?'':' Board errors: ${errors.join(', ')}'}');}catch(e){message('$e');}finally{if(mounted)setState(()=>busy=false);} }
   Future<void> open(String url) async {final uri=Uri.tryParse(url);if(uri!=null && ['https','http'].contains(uri.scheme))await launchUrl(uri,mode:LaunchMode.externalApplication);}
@@ -445,31 +448,25 @@ class _WorkspaceState extends State<Workspace> {
       final matchesCurrent=!currentOnly||x['current']==true;
       return matchesText&&matchesStatus&&matchesRelevant&&matchesContract&&matchesCurrent;
     }).toList();
-    const destinations=[
-      NavigationDestination(icon:Icon(Icons.work_outline),label:'Jobs'),
-      NavigationDestination(icon:Icon(Icons.approval_outlined),label:'Applications'),
-      NavigationDestination(icon:Icon(Icons.check_circle_outline),label:'Submitted'),
-      NavigationDestination(icon:Icon(Icons.dashboard_outlined),label:'Dashboard'),
-      NavigationDestination(icon:Icon(Icons.settings_outlined),label:'Setup'),
-    ];
-    const rail=[
-      NavigationRailDestination(icon:Icon(Icons.work_outline),label:Text('Jobs')),
-      NavigationRailDestination(icon:Icon(Icons.approval_outlined),label:Text('Applications')),
-      NavigationRailDestination(icon:Icon(Icons.check_circle_outline),label:Text('Submitted')),
-      NavigationRailDestination(icon:Icon(Icons.dashboard_outlined),label:Text('Dashboard')),
-      NavigationRailDestination(icon:Icon(Icons.settings_outlined),label:Text('Setup')),
-    ];
+    const labels=['Find jobs','Applications','Submitted','Overview','Job sources','Inbox','Resumes','Profile & answers','Follow-ups','Research','Activity'];
+    const icons=[Icons.work_outline,Icons.approval_outlined,Icons.check_circle_outline,Icons.dashboard_outlined,Icons.travel_explore,Icons.inbox_outlined,Icons.description_outlined,Icons.person_outline,Icons.reply_outlined,Icons.manage_search,Icons.history];
+    Widget navigation()=>ListView(children:[
+      const Padding(padding:EdgeInsets.all(20),child:Text('YOUR WORKSPACE',style:TextStyle(fontWeight:FontWeight.bold,letterSpacing:1.4,fontSize:12))),
+      for(var i=0;i<labels.length;i++) Padding(padding:const EdgeInsets.symmetric(horizontal:8,vertical:2),child:ListTile(
+        selected:tab==i,selectedTileColor:const Color(0xFFECE6FA),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(12)),
+        leading:Icon(icons[i]),title:Text(labels[i]),onTap:(){setState(()=>tab=i);if(!wide)Navigator.pop(context);}))
+    ]);
     return Scaffold(
-      appBar:AppBar(title:const Text('✦ Career Atlas',style:TextStyle(fontWeight:FontWeight.bold)),actions:[
+      drawer:wide?null:Drawer(child:SafeArea(child:navigation())),
+      appBar:AppBar(title:Text('Career Atlas · ${labels[tab]}',style:const TextStyle(fontWeight:FontWeight.bold,fontSize:18)),actions:[
         IconButton(tooltip:'Refresh',onPressed:reload,icon:const Icon(Icons.refresh)),
         IconButton(tooltip:'Sign out',onPressed:(){api.token=null;Navigator.of(context).pushReplacement(MaterialPageRoute(builder:(_)=>const Gate()));},icon:const Icon(Icons.logout))
       ]),
-      bottomNavigationBar:wide?null:NavigationBar(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),destinations:destinations),
       body:Row(children:[
-        if(wide)NavigationRail(selectedIndex:tab,onDestinationSelected:(x)=>setState(()=>tab=x),labelType:NavigationRailLabelType.all,destinations:rail),
+        if(wide)SizedBox(width:220,child:navigation()),
         Expanded(child:Center(child:ConstrainedBox(constraints:const BoxConstraints(maxWidth:1180),child:Padding(
           padding:EdgeInsets.all(wide?16:10),
-          child:switch(tab){0=>jobsView(filtered),1=>applicationsView(),2=>submittedView(),3=>dashboardView(),_=>setupView()}
+          child:switch(tab){0=>jobsView(filtered),1=>applicationsView(),2=>submittedView(),3=>dashboardView(),4=>setupView(),5=>inboxView(),6=>resumesView(),7=>profileView(),8=>followupsView(),9=>researchView(),_=>activityView()}
         ))))
       ])
     );
@@ -557,13 +554,13 @@ class _WorkspaceState extends State<Workspace> {
       const SizedBox(height:10),
       TextField(
         onChanged:(x)=>setState(()=>applicationQuery=x),
-        controller:TextEditingController(text:applicationQuery)..selection=TextSelection.collapsed(offset:applicationQuery.length),
+        controller:applicationSearch,
         decoration:InputDecoration(
           prefixIcon:const Icon(Icons.search),
           hintText:'Search company, role, provider, score, job ID or URL',
           suffixIcon:applicationQuery.isEmpty?null:IconButton(
             icon:const Icon(Icons.clear),
-            onPressed:()=>setState(()=>applicationQuery=''),
+            onPressed:(){applicationSearch.clear();setState(()=>applicationQuery='');},
           ),
           filled:true,
           border:const OutlineInputBorder(),
@@ -693,7 +690,7 @@ class _WorkspaceState extends State<Workspace> {
     const SizedBox(height:18),
     Row(children:[
       Expanded(child:Text('Automation settings',style:Theme.of(context).textTheme.titleMedium)),
-      OutlinedButton.icon(onPressed:editApplicationProfile,icon:const Icon(Icons.badge_outlined),label:const Text('Application profile'))
+      OutlinedButton.icon(onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.badge_outlined),label:const Text('Application profile'))
     ]),
     const SizedBox(height:7),
     Text('Quality mode',style:Theme.of(context).textTheme.titleSmall),const SizedBox(height:7),
@@ -712,35 +709,17 @@ class _WorkspaceState extends State<Workspace> {
       subtitle:Text('Technical ${m['technical']} · Experience ${m['experience']} · Location ${m['location']} · Difficulty ${m['difficulty']}'),
       trailing:Chip(label:Text('${m['probability']}%'))
     ))),
-    const SizedBox(height:18),Text('Recruiter messages',style:Theme.of(context).textTheme.titleMedium),
-    if(messages.isEmpty)const Text('No recruiter replies detected yet.'),
-    ...messages.map((m)=>Card(child:ExpansionTile(
-      leading:Icon(m['actionRequired']==true?Icons.mark_email_unread_outlined:Icons.email_outlined),
-      title:Text(m['subject']??''),
-      subtitle:Text('${m['classification']} · ${m['sender']}',maxLines:2,overflow:TextOverflow.ellipsis),
-      children:[Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-        if(m['classification']=='needs_review') const Text('Previous match could not be verified. This is not a confirmed employer response.'),
-        Text('Received: ${m['receivedAt']??"Unknown"}'),const SizedBox(height:8),
-        SelectableText(m['body']??'No message body available.'),
-      ]))],
-      trailing:(m['classification']=='interview' && m['applicationId']!=null)
-        ? TextButton(onPressed:()=>showInterviewPrep(m['applicationId'] as int),child:const Text('Prep'))
-        : (m['actionRequired']==true?const Chip(label:Text('Action')):null)
-    ))),
-    const SizedBox(height:18),Text('Follow-up drafts',style:Theme.of(context).textTheme.titleMedium),
-    if(followups.isEmpty)const Text('Follow-ups are prepared after 5 days with no recruiter response.'),
-    ...followups.take(8).map((d)=>Card(child:ExpansionTile(
-      title:Text('${d['title']} · ${d['company']}'),subtitle:Text('Status: ${d['status']} · due ${d['dueAt']??'-'}'),
-      children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(d['message']??''))]
-    ))),
-    const SizedBox(height:18),Text('CrewAI / research results',style:Theme.of(context).textTheme.titleMedium),
-    if(research.isEmpty)const Text('Research results appear after roles enter the automation pipeline.'),
-    ...research.take(8).map((r)=>Card(child:ExpansionTile(
-      title:Text('${r['title']} · ${r['company']}'),
-      subtitle:Text('Quality ${r['qualityScore']} · ${r['source']}'),
-      children:[Padding(padding:const EdgeInsets.all(12),child:Text('${r['companySummary']}\n\n${r['eligibilityNotes']}'))]
-    ))),
-    const SizedBox(height:18),Text('Tailored resume variants',style:Theme.of(context).textTheme.titleMedium),
+    const SizedBox(height:20),
+    Wrap(spacing:12,runSpacing:12,children:[
+      FilledButton.icon(onPressed:()=>setState(()=>tab=5),icon:const Icon(Icons.inbox_outlined),label:const Text('Open inbox')),
+      OutlinedButton.icon(onPressed:()=>setState(()=>tab=7),icon:const Icon(Icons.person_outline),label:const Text('Complete profile & answers')),
+      OutlinedButton.icon(onPressed:()=>setState(()=>tab=6),icon:const Icon(Icons.description_outlined),label:const Text('Review resumes')),
+    ]),
+  ]);
+
+  Widget resumesView()=>ListView(children:[
+    Text('Resumes & documents',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:12),
+const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),    const SizedBox(height:18),Text('Tailored resume variants',style:Theme.of(context).textTheme.titleMedium),
     if(resumeVariants.isEmpty)const Text('Verified-content resume variants are created only for roles that clear the selected quality threshold.'),
     ...resumeVariants.take(12).map((v)=>Card(child:ListTile(
       leading:const Icon(Icons.picture_as_pdf_outlined),
@@ -749,6 +728,46 @@ class _WorkspaceState extends State<Workspace> {
       trailing:IconButton(tooltip:'Preview tailored resume',icon:const Icon(Icons.visibility_outlined),onPressed:()=>showResumePreview(v['id'] as int)),
       onTap:()=>showResumePreview(v['id'] as int),
     ))),
+  ]);
+  Widget followupsView()=>ListView(children:[
+    const SizedBox(height:18),Text('Follow-up drafts',style:Theme.of(context).textTheme.titleMedium),
+    if(followups.isEmpty)const Text('Follow-ups are prepared after 5 days with no recruiter response.'),
+    ...followups.take(8).map((d)=>Card(child:ExpansionTile(
+      title:Text('${d['title']} · ${d['company']}'),subtitle:Text('Status: ${d['status']} · due ${d['dueAt']??'-'}'),
+      children:[Padding(padding:const EdgeInsets.all(12),child:SelectableText(d['message']??''))]
+    ))),
+  ]);
+  Widget researchView()=>ListView(children:[
+    const SizedBox(height:18),Text('Company research',style:Theme.of(context).textTheme.titleMedium),
+    if(research.isEmpty)const Text('Research results appear after roles enter the automation pipeline.'),
+    ...research.take(8).map((r)=>Card(child:ExpansionTile(
+      title:Text('${r['title']} · ${r['company']}'),
+      subtitle:Text('Quality ${r['qualityScore']} · ${r['source']}'),
+      children:[Padding(padding:const EdgeInsets.all(12),child:Text('${r['companySummary']}\n\n${r['eligibilityNotes']}'))]
+    ))),
+  ]);
+  Widget activityView()=>ListView(children:[
+    const SizedBox(height:18),Text('Recent LangGraph events',style:Theme.of(context).textTheme.titleMedium),
+    ...((dashboard['recentEvents'] as List?)??[]).take(20).map((e)=>Card(child:ListTile(
+      leading:const Icon(Icons.route_outlined),title:Text('${e['stage']} · ${e['type']}'),subtitle:Text(e['message']??'',maxLines:2,overflow:TextOverflow.ellipsis),
+      trailing:Text((e['createdAt']??'').toString().replaceFirst('T',' ').split('.').first)
+    ))),
+  ]);
+  Widget profileView()=>ListView(children:[
+    Text('Profile & answer library',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:8),
+    const Text('Write your facts once. Agents reuse saved profile fields and exact matching general questions. Leave unknown answers blank. Legal or sensitive answers stay in individual application review.'),
+    const SizedBox(height:16),Wrap(spacing:10,runSpacing:10,children:[
+      FilledButton.icon(onPressed:()=>editVault(),icon:const Icon(Icons.edit_outlined),label:const Text('Edit profile & answers')),
+      OutlinedButton.icon(onPressed:downloadTemplate,icon:const Icon(Icons.download_outlined),label:const Text('Download blank template')),
+      OutlinedButton.icon(onPressed:importVault,icon:const Icon(Icons.upload_file),label:const Text('Import filled template')),
+    ]),const SizedBox(height:12),
+    const Text('The template is a JSON file. You can also fill everything directly using Edit profile & answers. Import opens a review form before saving.'),
+    const SizedBox(height:18),
+    for(final entry in ((vault['profile'] as Map?)??{}).entries)
+      if(entry.value.toString().isNotEmpty)Card(child:ListTile(title:Text(((vault['fields'] as Map?)?[entry.key]??entry.key).toString()),subtitle:SelectableText(entry.value.toString()))),
+    Text('Saved general answers',style:Theme.of(context).textTheme.titleLarge),
+    if(((vault['answers'] as List?)??[]).isEmpty)const Padding(padding:EdgeInsets.all(12),child:Text('No reusable answers saved yet. Add your strongest skills, project descriptions and general experience answers.')),
+    for(final a in ((vault['answers'] as List?)??[]))Card(child:ListTile(title:Text(a['question']),subtitle:SelectableText(a['answer']))),
     const SizedBox(height:18),Text('Learned application fields',style:Theme.of(context).textTheme.titleMedium),
     if(questions.isEmpty)const Text('New reusable non-sensitive fields will appear here after the browser encounters them.'),
     ...questions.take(12).map((q)=>Card(child:ListTile(
@@ -757,13 +776,106 @@ class _WorkspaceState extends State<Workspace> {
       subtitle:Text('${q['host']} · ${q['sensitive']==true?'sensitive / isolated':((q['answerKey']??'').toString().isEmpty?'unmapped':'maps to ${q['answerKey']}')}'),
       trailing:q['sensitive']==true?null:TextButton(onPressed:()=>mapQuestion(q as Map),child:const Text('Map'))
     ))),
-    const SizedBox(height:18),Text('Recent LangGraph events',style:Theme.of(context).textTheme.titleMedium),
-    ...((dashboard['recentEvents'] as List?)??[]).take(20).map((e)=>Card(child:ListTile(
-      leading:const Icon(Icons.route_outlined),title:Text('${e['stage']} · ${e['type']}'),subtitle:Text(e['message']??'',maxLines:2,overflow:TextOverflow.ellipsis),
-      trailing:Text((e['createdAt']??'').toString().replaceFirst('T',' ').split('.').first)
-    ))),
   ]);
-  Widget setupView()=>ListView(children:[Text('Your setup',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:14),const Text('Documents (private PDFs; selectable text required)'),...['CV','Resume'].map((kind)=>Card(child:ListTile(title:Text(kind),subtitle:Text(documents.where((d)=>d['kind']==kind).map((d)=>d['filename']).firstOrNull??'Not uploaded'),trailing:OutlinedButton(onPressed:()=>upload(kind),child:const Text('Upload'))))),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),Card(child:ListTile(
+
+  Future<void> downloadTemplate() async {
+    try{final bytes=await api.getBytes('v3/vault/template');await FilePicker.platform.saveFile(fileName:'Career_Atlas_Profile.json',bytes:bytes);}catch(e){message('$e');}
+  }
+  Future<void> importVault() async {
+    try{
+      final f=await FilePicker.platform.pickFiles(type:FileType.custom,allowedExtensions:['json'],withData:true);
+      if(f==null)return;
+      if(f.files.single.size>500000)throw Exception('Use a template smaller than 500 KB.');
+      final data=jsonDecode(utf8.decode(f.files.single.bytes!));
+      if(data is! Map || data['profile'] is! Map || data['answers'] is! List)throw Exception('Use the downloaded profile template.');
+      await editVault(Map<String,dynamic>.from(data));
+    }catch(e){message('Import failed: $e');}
+  }
+  Future<void> editVault([Map<String,dynamic>? imported]) async {
+    final source=imported??vault;
+    final fields=Map<String,dynamic>.from((vault['fields'] as Map?)??{});
+    final values=Map<String,dynamic>.from((source['profile'] as Map?)??{});
+    if(values.keys.any((k)=>!fields.containsKey(k))){message('Template contains unknown profile fields.');return;}
+    final controllers={for(final k in fields.keys) k:TextEditingController(text:(values[k]??'').toString())};
+    final answers=<List<TextEditingController>>[];
+    for(final a in ((source['answers'] as List?)??[])){
+      if(a is! Map || a['question'] is! String || a['answer'] is! String){message('Each answer needs question and answer text.');return;}
+      answers.add([TextEditingController(text:a['question']),TextEditingController(text:a['answer'])]);
+    }
+    final allAnswers=[...answers]; bool saving=false; String? error;
+    if(!mounted)return;
+    await showDialog(context:context,barrierDismissible:false,builder:(d)=>StatefulBuilder(builder:(d,local)=>AlertDialog(
+      title:Text(imported==null?'Your profile & reusable answers':'Review imported profile'),
+      content:SizedBox(width:680,child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        const Text('Only enter facts you can support. Saving replaces the general answer list. Blank profile fields clear saved values.'),const SizedBox(height:16),
+        for(final k in fields.keys)Padding(padding:const EdgeInsets.only(bottom:12),child:TextField(controller:controllers[k],decoration:InputDecoration(labelText:fields[k].toString(),border:const OutlineInputBorder()))),
+        Text('General questions & answers',style:Theme.of(d).textTheme.titleLarge),const SizedBox(height:8),
+        const Text('Use exact question wording. Do not put passwords or sensitive identification here.'),
+        for(final pair in answers)Card(child:Padding(padding:const EdgeInsets.all(12),child:Column(children:[
+          TextField(controller:pair[0],decoration:const InputDecoration(labelText:'Question')),
+          TextField(controller:pair[1],minLines:2,maxLines:6,decoration:const InputDecoration(labelText:'Your factual answer')),
+          TextButton.icon(onPressed:saving?null:()=>local(()=>answers.remove(pair)),icon:const Icon(Icons.delete_outline),label:const Text('Remove answer')),
+        ]))),
+        OutlinedButton.icon(onPressed:saving?null:()=>local((){final pair=[TextEditingController(),TextEditingController()];answers.add(pair);allAnswers.add(pair);}),icon:const Icon(Icons.add),label:const Text('Add question')),
+        if(error!=null)Text(error!,style:const TextStyle(color:Colors.red)),
+      ]))),
+      actions:[TextButton(onPressed:saving?null:()=>Navigator.pop(d),child:const Text('Cancel')),
+        FilledButton(onPressed:saving?null:()async{
+          local((){saving=true;error=null;});
+          try{await api.request('POST','v3/vault',{'profile':{for(final e in controllers.entries)e.key:e.value.text},'answers':[for(final a in answers){'question':a[0].text,'answer':a[1].text}]});if(d.mounted)Navigator.pop(d);await reload();message('Profile and answers saved. Agents load them on their next run.');}
+          catch(e){if(d.mounted)local((){error='$e';saving=false;});}
+        },child:Text(saving?'Saving…':'Save verified answers'))]
+    )));
+    for(final c in controllers.values)c.dispose();for(final pair in allAnswers){for(final c in pair)c.dispose();}
+  }
+
+  Future<void> syncInbox() async {
+    setState(()=>syncingMail=true);
+    try{await api.request('POST','v3/messages/sync');await reload();message('Mailbox checked. No applications or outgoing emails were triggered.');}
+    catch(e){message('$e');}finally{if(mounted)setState(()=>syncingMail=false);}
+  }
+  Widget inboxView(){
+    String category(dynamic m){final kind=m['classification'];return kind=='app_notification'?'system':kind=='job_recommendation'?'alerts':kind=='needs_review'||m['applicationId']==null?'review':'replies';}
+    final visible=messages.where((m)=>category(m)==inboxFilter).toList();
+    return ListView(children:[
+      Text('Inbox',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:8),
+      const Text('Read the original email here. Matching is automated and may need review; an app notification is not an employer reply.'),
+      const SizedBox(height:12),Wrap(spacing:8,runSpacing:8,children:[
+        for(final f in [('replies','Possible employer replies'),('review','Needs review'),('alerts','Job alerts'),('system','App notifications')])
+          ChoiceChip(label:Text('${f.$2} (${messages.where((m)=>category(m)==f.$1).length})'),selected:inboxFilter==f.$1,onSelected:(_)=>setState(()=>inboxFilter=f.$1)),
+      ]),const SizedBox(height:12),Wrap(spacing:10,runSpacing:8,children:[
+        FilledButton.icon(onPressed:syncingMail?null:syncInbox,icon:const Icon(Icons.sync),label:Text(syncingMail?'Checking mailbox…':'Check email now')),
+        OutlinedButton.icon(onPressed:()=>open('https://mail.google.com/'),icon:const Icon(Icons.open_in_new),label:const Text('Open Gmail')),
+      ]),const SizedBox(height:8),Text(emailStatus['message']??''),const SizedBox(height:12),
+      if(visible.isEmpty)const Card(child:Padding(padding:EdgeInsets.all(24),child:Text('No messages in this section. Check Needs review and Job alerts, or sync your mailbox.'))),
+      for(final m in visible)Card(child:ListTile(
+        contentPadding:const EdgeInsets.all(16),leading:const Icon(Icons.mail_outline),
+        title:Text(m['subject']??'No subject'),subtitle:Text('${m['sender']}\n${m['receivedAt']}'),
+        trailing:const Icon(Icons.chevron_right),onTap:()=>showDialog(context:context,builder:(d)=>AlertDialog(
+          title:Text(m['subject']??'Message'),content:SizedBox(width:760,child:SingleChildScrollView(child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+            Text('From: ${m['sender']}'),Text('Received: ${m['receivedAt']}'),const Divider(),
+            if(category(m)!='replies')const Padding(padding:EdgeInsets.only(bottom:12),child:Text('This is not a confirmed employer response.')),
+            SelectableText((m['body']??'').toString().trim().isEmpty?'No readable body was stored. Check the original email in Gmail.':m['body']),
+          ]))),actions:[if(m['classification']=='interview'&&m['applicationId']!=null)TextButton(onPressed:()=>showInterviewPrep(m['applicationId']),child:const Text('Interview preparation')),TextButton(onPressed:()=>Navigator.pop(d),child:const Text('Close'))]
+        ))
+      )),
+    ]);
+  }
+
+  Future<void> importListing() async {
+    final fields={for(final k in ['url','company','title','location','description'])k:TextEditingController()};bool saving=false;String? error;
+    await showDialog(context:context,builder:(d)=>StatefulBuilder(builder:(d,local)=>AlertDialog(
+      title:const Text('Save a job from a supported website'),content:SizedBox(width:650,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
+        const Text('Paste the original listing and its details. Check the employer and eligibility before applying. This saves a job; it does not submit an application.'),
+        for(final e in fields.entries)TextField(controller:e.value,minLines:e.key=='description'?4:1,maxLines:e.key=='description'?10:1,decoration:InputDecoration(labelText:e.key)),
+        if(error!=null)Text(error!,style:const TextStyle(color:Colors.red)),
+      ]))),actions:[TextButton(onPressed:saving?null:()=>Navigator.pop(d),child:const Text('Cancel')),FilledButton(onPressed:saving?null:()async{
+        local((){saving=true;error=null;});try{final r=await api.request('POST','v3/jobs/import',{for(final e in fields.entries)e.key:e.value.text.trim()});if(d.mounted)Navigator.pop(d);await reload();setState((){tab=0;relevantOnly=false;contractOnly=false;currentOnly=false;query='';});message(r['added']==true?'Listing saved. Review it in Find jobs.':'This listing is already saved.');}catch(e){if(d.mounted)local((){error='$e';saving=false;});}
+      },child:Text(saving?'Saving…':'Save listing'))]
+    )));for(final c in fields.values)c.dispose();
+  }
+
+  Widget setupView()=>ListView(children:[Text('Job sources',style:Theme.of(context).textTheme.headlineSmall),const SizedBox(height:10),const Text('Public feeds sync through Find jobs. Other websites open directly: paste a listing to track it here. Site reputation does not verify every employer.'),const SizedBox(height:12),Align(alignment:Alignment.centerLeft,child:FilledButton.icon(onPressed:importListing,icon:const Icon(Icons.add_link),label:const Text('Import a listing'))),...jobSites.map((site)=>Card(child:ListTile(title:Text(site['name']),subtitle:Text('${site['region']} · ${site['mode']}'),trailing:const Icon(Icons.open_in_new),onTap:()=>open(site['url'])))),const SizedBox(height:14),const SizedBox(height:22),Row(children:[const Expanded(child:Text('Company career boards')),FilledButton(onPressed:addSource,child:const Text('Add company'))]),...sources.map((source)=>Card(child:ListTile(title:Text(source['company']),subtitle:Text('${source['provider']} · ${source['slug']}'),trailing:IconButton(icon:const Icon(Icons.delete_outline),onPressed:()async{await api.request('DELETE','sources/${source['id']}');await reload();})))),const SizedBox(height:18),Text('Suggested company boards',style:Theme.of(context).textTheme.titleMedium),const SizedBox(height:6),const Text('Add the boards you want to follow. Individual job locations and eligibility vary.'),...recommendedBoards.map((board)=>Card(child:ListTile(title:Text(board.$1),subtitle:Text(board.$2,overflow:TextOverflow.ellipsis),trailing:OutlinedButton(onPressed:sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?null:()=>addRecommended(board.$1,board.$2),child:Text(sources.any((s)=>s['slug']==Uri.parse(board.$2).pathSegments.first)?'Added':'Add'))))),const SizedBox(height:20),Card(child:ListTile(
   leading:Icon(emailStatus['monitorEnabled']==true&&emailStatus['imapConfigured']==true?Icons.mark_email_read_outlined:Icons.mail_outline),
   title:Text(emailStatus['monitorEnabled']==true&&emailStatus['imapConfigured']==true?'Incoming recruiter email monitoring is enabled':'Incoming recruiter email monitoring is not enabled'),
   subtitle:Text('${emailStatus['message']??'Email status unavailable.'}\nSMTP for this app: ${emailStatus['smtpConfigured']==true?'configured':'not configured'} · scheduled agent uses separate GitHub Actions secrets'),

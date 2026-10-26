@@ -1,3 +1,38 @@
+## October 2026 workspace update
+
+The workspace now separates **Overview, Find jobs, Applications, Submitted, Inbox,
+Resumes, Profile & answers, Job sources, Follow-ups, Research, and Activity**.
+On phones, use the menu button to switch sections.
+
+- **Inbox:** click a message to read its stored body. Employer matches, review items,
+  job alerts and app notifications are separate. Self-generated notifications never
+  trigger recruiter matching. HTML-only messages are converted to readable text.
+  “Check email now” only syncs incoming email; it does not run applications or send
+  notifications. This button requires IMAP configuration on the web service.
+  Scheduled workers may have separate credentials. Sync reads the latest 200 messages
+  within 14 days. Older messages already deleted from the database are not recovered.
+- **Profile & answers:** fill the form directly, or download/import the JSON template.
+  Imported data is reviewed before saving. The saved profile and exact-question answer
+  library are loaded from the database by the scheduled worker. Unknown questions still
+  need review. Legal and sensitive questions are not accepted in the general answer library.
+  Store only reusable facts; company-specific answers belong to that application.
+- **Job sources:** existing public feed integrations remain available. Naukrigulf, Bayt,
+  Rozee and Indeed are directory links plus a manual listing-import workflow, not automated
+  scraping integrations. Copy the listing URL, employer, role, location and description;
+  duplicates by URL are rejected. Every employer and eligibility requirement still needs checking.
+- **Resumes:** upload source PDFs and preview/download generated resumes in one section.
+
+Template: [Career_Atlas_Profile.json](examples/Career_Atlas_Profile.json).
+Fill the `profile` values. To add general answers, use objects such as
+`{"question":"What is your strongest skill?","answer":"Your own factual answer"}`
+inside the `answers` array. Do not include secrets. Blank profile fields clear saved
+values; saving replaces the general answer list. Existing unrelated profile settings
+are preserved.
+
+Validation: `python -m pytest backend/tests -q`.
+
+---
+
 # Career Atlas — Flutter and FastAPI
 
 Live at https://career-atlas-yhx1.onrender.com/
