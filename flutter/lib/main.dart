@@ -714,10 +714,15 @@ class _WorkspaceState extends State<Workspace> {
     ))),
     const SizedBox(height:18),Text('Recruiter messages',style:Theme.of(context).textTheme.titleMedium),
     if(messages.isEmpty)const Text('No recruiter replies detected yet.'),
-    ...messages.take(8).map((m)=>Card(child:ListTile(
+    ...messages.map((m)=>Card(child:ExpansionTile(
       leading:Icon(m['actionRequired']==true?Icons.mark_email_unread_outlined:Icons.email_outlined),
       title:Text(m['subject']??''),
       subtitle:Text('${m['classification']} · ${m['sender']}',maxLines:2,overflow:TextOverflow.ellipsis),
+      children:[Padding(padding:const EdgeInsets.all(16),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+        if(m['classification']=='needs_review') const Text('Previous match could not be verified. This is not a confirmed employer response.'),
+        Text('Received: ${m['receivedAt']??"Unknown"}'),const SizedBox(height:8),
+        SelectableText(m['body']??'No message body available.'),
+      ]))],
       trailing:(m['classification']=='interview' && m['applicationId']!=null)
         ? TextButton(onPressed:()=>showInterviewPrep(m['applicationId'] as int),child:const Text('Prep'))
         : (m['actionRequired']==true?const Chip(label:Text('Action')):null)
