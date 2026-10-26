@@ -36,6 +36,8 @@ def test_source_scan_and_dedupe(monkeypatch):
     def fake_fetch(c,source):
         return [dict(company='Acme',title='Junior Python Engineer',location='Remote',description='Build APIs',url='https://boards.greenhouse.io/acme/jobs/42',apply_url='https://boards.greenhouse.io/acme/jobs/42',provider='Greenhouse')]
     monkeypatch.setattr(main,'fetch_board',fake_fetch)
+    import public_sources
+    monkeypatch.setattr(public_sources,'scan_public_sources',lambda *args:{'added':0,'errors':[]})
     assert client.post('/api/scan',headers=h).json()['added']==1
     assert client.post('/api/scan',headers=h).json()['added']==0
     jobs=client.get('/api/jobs',headers=h).json()
@@ -92,8 +94,8 @@ def test_gemini_rejection_has_honest_local_fallback(monkeypatch):
     doc=main.Document(extracted_text='Python and FastAPI experience')
     score,rationale,draft=main.ai_prepare(job,doc)
     assert 0 <= score <= 85
-    assert 'Local keyword estimate' in rationale and 'HTTP 429' in rationale
-    assert 'not an AI assessment' in rationale
+    assert 'Local weighted estimate' in rationale and 'HTTP 429' in rationale
+    assert 'does not invent missing experience' in rationale
     assert 'Acme' in draft
 
 
@@ -200,3 +202,22 @@ def test_email_notification_uses_configured_smtp_without_exposing_credentials(mo
     assert automation.send_email_notification('owner@example.com','Career Atlas update','Your application was confirmed.')
     assert len(sent)==1 and sent[0]['To']=='owner@example.com'
     assert 'private-test-secret' not in sent[0].as_string()
+
+
+def test_invalid_email_remains_visible_without_new_mail(monkeypatch):
+    monkeypatch.setattr(worker,'fetch_recent_messages',lambda:[])
+    with main.SessionLocal() as db:
+        job=main.Job(title='AI Engineer',company='Binance',description='',location='Remote',url='https://example.com/email-test',apply_url='https://example.com/email-test',provider='Other')
+        db.add(job);db.flush()
+        app=main.Application(job_id=job.id,status='applied',document_id=1,score=80,rationale='',draft='')
+        db.add(app);db.flush()
+        row=worker.EmployerMessage(application_id=app.id,sender='Freelancer',subject='Projects might interest you',body='Binance assessment',classification='assessment',action_required=True)
+        db.add(row);db.commit();mid=row.id
+        worker.process_recruiter_mail(db,None,{})
+        db.commit()
+        preserved=db.get(worker.EmployerMessage,mid)
+        assert preserved.application_id is None
+        assert preserved.classification=='needs_review'
+        assert not preserved.action_required
+    msgs=client.get('/api/v3/messages',headers=headers()).json()
+    assert any(m['id']==mid and m['body']=='Binance assessment' for m in msgs)
