@@ -699,33 +699,24 @@ def process_recruiter_mail(session,doc,stats):
     try:messages=fetch_recent_messages()
     except Exception as exc:
         stats["emailMonitorError"]=f"{type(exc).__name__}: {str(exc)[:120]}";return
-    if not messages:return
     pairs=session.execute(
         select(Application,Job)
         .join(Job,Job.id==Application.job_id)
         .where(Application.status=="applied")
     ).all()
 
-    # Revalidate records imported by earlier matcher versions. Keep only
-    # messages that still have strong evidence for their linked application.
+    # Preserve previously notified messages for audit/review instead of
+    # silently deleting them when a match is invalidated or status changes.
+    all_pairs=session.execute(select(Application,Job).join(Job,Job.id==Application.job_id)).all()
     for old in session.scalars(select(EmployerMessage)).all():
-        if old.application_id is None:
-            session.delete(old)
-            continue
-        app_job=next(((a,j) for a,j in pairs if a.id==old.application_id),None)
+        if old.application_id is None:continue
+        app_job=next(((a,j) for a,j in all_pairs if a.id==old.application_id),None)
         if not app_job or not match_application(
-            {"sender":old.sender,"subject":old.subject,"body":old.body},
-            [app_job],
-        ):
-            session.delete(old)
+            {"sender":old.sender,"subject":old.subject,"body":old.body},[app_job]):
+            old.application_id=None
+            old.classification="needs_review"
+            old.action_required=False
     session.flush()
-    for prep in session.scalars(select(InterviewPrep)).all():
-        has_interview=session.scalar(select(EmployerMessage).where(
-            EmployerMessage.application_id==prep.application_id,
-            EmployerMessage.classification=="interview"
-        ))
-        if not has_interview:
-            session.delete(prep)
 
     matched_count=0
     for msg in messages:
