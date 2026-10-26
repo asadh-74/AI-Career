@@ -34,7 +34,7 @@ jobs:
       - name: Run API regression tests
         run: |
           pip install pytest
-          pytest -q tests/test_api.py
+          pytest -q tests
       - name: Import v3 modules
         run: |
           python - <<'PY'
