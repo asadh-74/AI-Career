@@ -1,3 +1,17 @@
+## Career Atlas application workflow (review-first)
+
+Career Atlas is your existing job-search workspace; no second tracker is needed.
+
+1. **Discover:** the scheduled worker checks configured company boards every six hours and prioritizes recent remote software, AI/ML, automation, and contract/project roles.
+2. **Prepare:** it scores relevant roles and creates no more than five new job-specific resume drafts per run, using only verified material from your uploaded CV.
+3. **Review:** open **Applications** to inspect the match, rationale, tailored resume, and application draft. The draft is reviewable and downloadable.
+4. **Apply:** open the employer's official application page and submit it yourself after checking every answer and attachment.
+5. **Track:** mark the role submitted and save the confirmation; Career Atlas records the status and can track later recruiter replies.
+
+The scheduled workflow has `AUTO_APPLY=false` and `PREPARE_ONLY=true`. It does not fill employer forms, click submit, email employers, or publish anything. Legacy auto-submission workflows are disabled. Keep the uploaded source CV current and review each generated file before using it.
+
+---
+
 ## Automatic CV memory
 
 Uploaded selectable-text PDFs now populate a source-tracked profile automatically.
@@ -148,7 +162,7 @@ This branch adds a fail-safe job application worker on top of the existing FastA
 
 ### Important behavior
 
-`AUTO_SUBMIT_BROWSER` defaults to `false`. With that default, Playwright fills a recognized form and stops before the final submission button. Set it to `true` only after testing the target application flows. Even then, the worker refuses to guess sensitive or uncertain screening answers and never bypasses CAPTCHA or anti-bot checks.
+The hosted worker is currently in review-only mode: `AUTO_APPLY=false`, `PREPARE_ONLY=true`, and `AUTO_SUBMIT_BROWSER=false`. It prepares role-specific drafts for you to review; it does not fill forms or submit applications. Do not enable automatic submission for your account.
 
 The worker does not use an AI-detector evasion service. It performs a small writing-quality pass and keeps Gemini grounded in the uploaded resume/CV and job description.
 
