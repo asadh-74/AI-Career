@@ -846,6 +846,7 @@ def absorb_agent_answers(session,application_id,result):
 def run(target_job_id_override=None):
     cfg=AutomationConfig.from_env()
     prepare_only=os.getenv("PREPARE_ONLY","false").strip().lower() in {"1","true","yes","on"}
+    prepare_only_limit=max(1,min(25,int(os.getenv("PREPARE_ONLY_LIMIT","5"))))
     if not cfg.enabled and not prepare_only:return {"status":"disabled","processed":0}
     stats={"status":"ok","sourcesScanned":0,"newJobs":0,"scanErrors":[],"publicSources":{},"jobsConsidered":0,
            "remoteEligible":0,"titleRelevant":0,"scored":0,"belowThreshold":0,"processed":0,"prepared":0,"applied":0,
@@ -994,6 +995,7 @@ def run(target_job_id_override=None):
         max_attempts=max(30,min(150,remaining_today*8 if remaining_today else 30))
 
         for job in jobs:
+            if prepare_only and stats["prepared"]>=prepare_only_limit:break
             if not job:continue
             stats["jobsConsidered"]+=1
 
@@ -1088,6 +1090,11 @@ def run(target_job_id_override=None):
                 stats["belowThreshold"]+=1
                 record_event(session,job.id,"matched","below_threshold",f"Match score {existing.score} is below {cfg.min_match_score}.",application_id=existing.id)
                 session.commit();continue
+
+            if prepare_only and existing.status=="ready_for_review":
+                saved_variant=session.scalar(select(ResumeVariant).where(ResumeVariant.job_id==job.id))
+                if saved_variant and saved_variant.source_document_id==doc.id:
+                    continue
 
             apply_doc=tailored_doc_for(session,job,doc)
             learned=learned_answers_for(session,job.apply_url,profile)
