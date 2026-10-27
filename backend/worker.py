@@ -845,9 +845,10 @@ def absorb_agent_answers(session,application_id,result):
 
 def run(target_job_id_override=None):
     cfg=AutomationConfig.from_env()
-    if not cfg.enabled:return {"status":"disabled","processed":0}
+    prepare_only=os.getenv("PREPARE_ONLY","false").strip().lower() in {"1","true","yes","on"}
+    if not cfg.enabled and not prepare_only:return {"status":"disabled","processed":0}
     stats={"status":"ok","sourcesScanned":0,"newJobs":0,"scanErrors":[],"publicSources":{},"jobsConsidered":0,
-           "remoteEligible":0,"titleRelevant":0,"scored":0,"belowThreshold":0,"processed":0,"applied":0,
+           "remoteEligible":0,"titleRelevant":0,"scored":0,"belowThreshold":0,"processed":0,"prepared":0,"applied":0,
            "needsAttention":0,"failed":0,"alreadyApplied":0,"duplicatesSkipped":0,"retried":0}
 
     with SessionLocal() as session:
@@ -939,16 +940,18 @@ def run(target_job_id_override=None):
         # Applications that are already prepared and safe for autonomous
         # continuation jump ahead of fresh discovery. This is the core
         # submit-first behavior: review is fallback, not the default.
-        priority_apps=session.execute(
-            select(Application,Job)
-            .join(Job,Application.job_id==Job.id)
-            .where(
-                Application.status.in_(("ready_for_retry","ready_for_review","needs_human","technical_blocked")),
-                Application.score>=cfg.min_match_score,
-            )
-            .order_by(Application.created_at.asc())
-            .limit(80)
-        ).all()
+        priority_apps=[]
+        if not prepare_only:
+            priority_apps=session.execute(
+                select(Application,Job)
+                .join(Job,Application.job_id==Job.id)
+                .where(
+                    Application.status.in_(("ready_for_retry","ready_for_review","needs_human","technical_blocked")),
+                    Application.score>=cfg.min_match_score,
+                )
+                .order_by(Application.created_at.asc())
+                .limit(80)
+            ).all()
         priority_pairs=[]
         for app_row,job_row in priority_apps:
             if review_requires_user(session,app_row.id):
@@ -1090,8 +1093,20 @@ def run(target_job_id_override=None):
             learned=learned_answers_for(session,job.apply_url,profile)
             learned.extend(review_answers_for(session,existing.id))
             record_event(session,job.id,"prepared","prepared",f"Probability {metric.probability}%; difficulty {metric.difficulty}%.",application_id=existing.id)
-            record_event(session,job.id,"applying","attempt_started","LangGraph application attempt started.",application_id=existing.id)
+            if prepare_only:
+                if existing.status in ("failed","ready_for_retry"):
+                    existing.status="ready_for_review"
+                record_event(
+                    session,job.id,"prepared","awaiting_owner_review",
+                    "Tailored resume and application draft prepared. Nothing was submitted; owner review is required.",
+                    application_id=existing.id,
+                )
+                stats["prepared"]+=1
+                stats["processed"]+=1
+                session.commit()
+                continue
 
+            record_event(session,job.id,"applying","attempt_started","LangGraph application attempt started.",application_id=existing.id)
             result=run_application_graph(job=job,doc=apply_doc,cfg=cfg,score=existing.score,draft=existing.draft,learned_answers=learned)
             state=result.get("status","failed")
             persisted_generated,generated=absorb_agent_answers(session,existing.id,result)
