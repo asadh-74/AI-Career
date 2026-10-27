@@ -1,63 +1,11 @@
-# direct-source-batch: 2026-10-12-autonomy-v8-hardened
-name: Career Atlas Automation
+name: Legacy automatic application workflow (disabled)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/career-automation.yml"
-  schedule:
-    # Hourly fallback for answered review jobs and new software opportunities.
-    - cron: "15 * * * *"
-
-concurrency:
-  group: career-atlas-auto-apply
-  cancel-in-progress: true
 
 jobs:
-  apply:
+  disabled:
+    if: ${{ false }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    defaults:
-      run:
-        working-directory: backend
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
-      ADMIN_PASSWORD_HASH: ${{ secrets.ADMIN_PASSWORD_HASH }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      GEMINI_MODEL: gemini-3.8-flash
-      AUTO_APPLY: "true"
-      MIN_MATCH_SCORE: "65"
-      MAX_APPLICATIONS_PER_DAY: "30"
-      REMOTE_ONLY: "true"
-      SOFTWARE_ONLY: "true"
-      ALLOW_EMAIL_APPLICATIONS: "false"
-      ALLOW_BROWSER_APPLICATIONS: "true"
-      ALLOW_INDEED: ${{ vars.ALLOW_INDEED || 'true' }}
-      ALLOW_GLASSDOOR: ${{ vars.ALLOW_GLASSDOOR || 'true' }}
-      AUTO_SUBMIT_BROWSER: "true"
-      AUTONOMOUS_AGENT_ANSWERS: "true"
-      TARGET_JOB_ID: ""
-      TAILOR_RESUME: "true"
-      CONTRACT_PROJECT_ONLY: "true"
-      ENABLE_EMAIL_MONITOR: "true"
-      IMAP_HOST: "imap.gmail.com"
-      CREWAI_LLM: ""
-      APPLICANT_PROFILE_JSON: ${{ secrets.APPLICANT_PROFILE_JSON }}
-      SMTP_HOST: ${{ secrets.SMTP_HOST }}
-      SMTP_PORT: ${{ secrets.SMTP_PORT }}
-      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-      SMTP_FROM: ${{ secrets.SMTP_FROM }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements.txt
-      - run: pip install -r requirements.txt
-      - run: python -m playwright install --with-deps chromium
-      - run: python worker.py
+      - run: echo "Automatic applications are disabled. Review and submit each application in Career Atlas."
