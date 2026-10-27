@@ -28,6 +28,7 @@ jobs:
       GEMINI_MODEL: gemini-2.5-flash
       AUTO_APPLY: "false"
       PREPARE_ONLY: "true"
+      PREPARE_ONLY_LIMIT: "5"
       AUTO_SUBMIT_BROWSER: "false"
       MIN_MATCH_SCORE: "72"
       MAX_APPLICATIONS_PER_DAY: "15"
