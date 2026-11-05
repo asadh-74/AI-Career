@@ -1,3 +1,5 @@
+> **Hosted demo status checked 5 November 2026:** Career Atlas is currently unavailable because its Render Free PostgreSQL database expired on 28 October 2026 and Render reports it suspended. The latest Docker build completed, but the running app cannot resolve the suspended database host. The app is not ready for a hosted recruiter walkthrough until the owner restores a database or completes a migration. Do not describe this as a normal cold start or successful deployment.  
+>
 ## Career Atlas application workflow (review-first)
 
 ## Portfolio case study — 60–75 second demo
