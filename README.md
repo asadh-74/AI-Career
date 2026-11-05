@@ -1,5 +1,23 @@
 ## Career Atlas application workflow (review-first)
 
+## Portfolio case study — 60–75 second demo
+
+**Problem:** Job discovery, CV tailoring and follow-ups are spread across separate job boards and files. Career Atlas helps prepare and track applications while keeping the final decision with the applicant.
+
+**My contribution:** Built a FastAPI/Python application with a multi-section workspace, configured job sources, source-grounded CV parsing, match explanations, tailored resume/answer drafts, inbox and follow-up tracking.
+
+**Record this flow with a sanitized CV and fictional job description:**
+
+- **0–10 sec:** State the problem and show Find jobs.
+- **10–25 sec:** Open a relevant backend role and show its match rationale and source.
+- **25–45 sec:** Open the prepared resume and answers; point out which details are grounded in the supplied profile and which require review.
+- **45–60 sec:** Show Applications and the saved draft state, then Inbox or Follow-ups.
+- **60–75 sec:** State the boundary: `AUTO_APPLY=false` and `PREPARE_ONLY=true`. The app does not fill employer forms, submit applications or email employers. The applicant reviews and submits on the employer's site.
+
+Use fake or redacted contact details in screenshots. The public application requires sign-in and the free Render service may sleep between visits. Do not include personal CV data, employer credentials, or a real application submission in a portfolio recording. No actual screenshots or recording should be claimed until you capture the real UI.
+
+---
+
 Career Atlas is your existing job-search workspace; no second tracker is needed.
 
 1. **Discover:** the scheduled worker checks configured company boards every six hours and prioritizes recent remote software, AI/ML, automation, and contract/project roles.
